@@ -95,7 +95,7 @@ export async function getRandomQuestion(categorySlug?: string, difficulty?: stri
   const res = await fetch(`${API_BASE}/questions/random?${params.toString()}`);
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.error || 'Failed to get question');
+    throw new Error(err.error || 'Failed to retrieve question');
   }
   return res.json();
 }
@@ -119,7 +119,7 @@ export async function deleteQuestion(questionId: number): Promise<void> {
 
 export async function getUserStats(): Promise<UserStats> {
   const res = await fetch(`${API_BASE}/stats`);
-  if (!res.ok) throw new Error('Failed to load stats');
+  if (!res.ok) throw new Error('Failed to load user stats');
   return res.json();
 }
 
@@ -134,6 +134,6 @@ export async function triggerWorker(): Promise<{ message: string }> {
     method: 'POST'
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.message || 'Trigger failed');
+  if (!res.ok) throw new Error(data.message || 'Worker trigger failed');
   return data;
 }

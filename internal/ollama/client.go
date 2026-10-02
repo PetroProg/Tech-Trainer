@@ -13,22 +13,25 @@ import (
 	"github.com/PetroProg/tech-trainer/internal/models"
 )
 
+// Client handles communication with the Ollama HTTP API.
 type Client struct {
 	baseURL    string
 	modelName  string
 	httpClient *http.Client
 }
 
+// NewClient creates a new Ollama API client.
 func NewClient(baseURL, modelName string) *Client {
 	return &Client{
 		baseURL:   strings.TrimRight(baseURL, "/"),
 		modelName: modelName,
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second, // Инференс 7B модели
+			Timeout: 120 * time.Second, // 7B inference timeout
 		},
 	}
 }
 
+// Ping checks if the Ollama service is reachable and responsive.
 func (c *Client) Ping(ctx context.Context) bool {
 	reqCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
@@ -59,35 +62,36 @@ type generateResponse struct {
 	Response string `json:"response"`
 }
 
+// GenerateQuestion requests a structured technical question from Ollama.
 func (c *Client) GenerateQuestion(ctx context.Context, categoryName, promptInstructions, difficulty string) (*models.GeneratedQuestionDTO, error) {
-	systemPrompt := "Ты — экспертный технический экзаменатор. Твоя задача — составить 1 практическую задачу для программистов и инженеров.\n\n" +
-		"ПРАВИЛА И ТРЕБОВАНИЯ:\n" +
-		"1. Уровень сложности: Junior или Light-Middle (прикладные задачи, без академизма и без сложного Senior-уровня).\n" +
-		"2. Язык вопроса, вариантов и объяснения — РУССКИЙ (технические термины и код на английском).\n" +
-		"3. Вариантов ответа ДОЛЖНО БЫТЬ РОВНО 4.\n" +
-		"4. ВАЖНО: Правильных ответов может быть ОТ 1 ДО 4 (один, два, три или все четыре). Не делай всегда 1 правильный ответ! Периодически создавай вопросы с 2 или 3 правильными ответами.\n" +
-		"5. Поле correct_indices — массив 0-based индексов правильных ответов (например, [0], или [1, 3], или [0, 1, 2]).\n" +
-		"6. Поле type — \"multiple_choice\" (вопрос без кода) или \"code_analysis\" (разбор кода, поиск бага или что выведет код).\n" +
-		"7. Если есть код — укажи его в поле code без обратных кавычек, а в language укажи язык (python, go, bash, rust, sql, dockerfile, json). Если кода нет — code: \"\".\n" +
-		"8. В поле explanation дай подробный разбор: почему правильные ответы верны, что происходит под капотом, и почему остальные варианты неверны.\n\n" +
-		"ОТВЕТ ДОЛЖЕН БЫТЬ СТРОГО В ФОРМАТЕ JSON:\n" +
+	systemPrompt := "You are a Principal Software Engineer and Technical Examiner. Your mission is to formulate exactly 1 high-quality practical technical challenge for software engineers.\n\n" +
+		"RULES AND CONSTRAINTS:\n" +
+		"1. Difficulty Level: Junior or Light-Middle (practical, real-world applied questions; avoid pedantic trivia or overly complex algorithmic puzzles).\n" +
+		"2. Language: All text (question, options, explanation) must be in clear, professional ENGLISH.\n" +
+		"3. Number of Options: There MUST be EXACTLY 4 options.\n" +
+		"4. Correct Answers: Between 1 and 4 correct answers (single choice OR multiple choice). Vary between 1, 2, or 3 correct answers to test deep understanding.\n" +
+		"5. correct_indices field: A 0-based array of indices of the correct options (e.g. [0], [1, 3], or [0, 2, 3]).\n" +
+		"6. type field: 'multiple_choice' (conceptual or architectural question without code) or 'code_analysis' (snippet bug hunt, execution trace, or runtime behavior).\n" +
+		"7. If code is present, put pure code in the 'code' field WITHOUT markdown triple backticks. In 'language', specify the language (go, python, bash, rust, sql, dockerfile, json). If no code is needed, set code to empty string \"\".\n" +
+		"8. In 'explanation', provide an in-depth breakdown: why the correct choices are valid, what happens under the hood, and why incorrect choices fail.\n\n" +
+		"RESPONSE MUST BE STRICT JSON MATCHING THIS EXACT SCHEMA:\n" +
 		"{\n" +
 		"  \"type\": \"code_analysis\",\n" +
 		"  \"difficulty\": \"junior\",\n" +
-		"  \"question\": \"Текст вопроса...\",\n" +
-		"  \"code\": \"фрагмент кода...\",\n" +
+		"  \"question\": \"Question text here...\",\n" +
+		"  \"code\": \"snippet code here...\",\n" +
 		"  \"language\": \"go\",\n" +
 		"  \"options\": [\n" +
-		"    \"Вариант 1\",\n" +
-		"    \"Вариант 2\",\n" +
-		"    \"Вариант 3\",\n" +
-		"    \"Вариант 4\"\n" +
+		"    \"Option 1 text\",\n" +
+		"    \"Option 2 text\",\n" +
+		"    \"Option 3 text\",\n" +
+		"    \"Option 4 text\"\n" +
 		"  ],\n" +
 		"  \"correct_indices\": [1, 2],\n" +
-		"  \"explanation\": \"Подробное объяснение решения...\"\n" +
+		"  \"explanation\": \"Detailed technical explanation...\"\n" +
 		"}"
 
-	userPrompt := fmt.Sprintf("Категория: %s\nИнструкции по тематике: %s\nЖелаемая сложность: %s\n\nСоставь интересную прикладную задачу строго в указанном формате JSON.",
+	userPrompt := fmt.Sprintf("Category: %s\nTopic guidelines: %s\nTarget difficulty: %s\n\nFormulate a practical engineering challenge strictly matching the JSON format.",
 		categoryName, promptInstructions, difficulty)
 
 	reqBody := generateRequest{

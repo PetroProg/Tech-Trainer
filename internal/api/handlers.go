@@ -13,11 +13,13 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// API encapsulates HTTP handlers for the application endpoints.
 type API struct {
 	database *db.DB
 	worker   *worker.Worker
 }
 
+// NewAPI constructs a new API handler instance.
 func NewAPI(database *db.DB, worker *worker.Worker) *API {
 	return &API{
 		database: database,
@@ -25,16 +27,19 @@ func NewAPI(database *db.DB, worker *worker.Worker) *API {
 	}
 }
 
+// writeJSON encodes an entity as JSON to the response writer.
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(data)
 }
 
+// writeError outputs a formatted error JSON object.
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
 }
 
+// GetCategories returns all active categories and their question counters.
 func (a *API) GetCategories(w http.ResponseWriter, r *http.Request) {
 	categories, err := a.database.GetCategories()
 	if err != nil {
@@ -44,6 +49,7 @@ func (a *API) GetCategories(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, categories)
 }
 
+// CreateCategoryRequest defines the payload for creating a custom category.
 type CreateCategoryRequest struct {
 	Name                string `json:"name"`
 	Description         string `json:"description"`
@@ -52,16 +58,18 @@ type CreateCategoryRequest struct {
 
 var nonAlphaNumRegex = regexp.MustCompile(`[^a-z0-9]+`)
 
+// slugify converts a human-readable title into a URL-friendly slug.
 func slugify(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	s = nonAlphaNumRegex.ReplaceAllString(s, "-")
 	return strings.Trim(s, "-")
 }
 
+// CreateCategory adds a new category and triggers background question generation.
 func (a *API) CreateCategory(w http.ResponseWriter, r *http.Request) {
 	var req CreateCategoryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid JSON")
+		writeError(w, http.StatusBadRequest, "Invalid JSON payload")
 		return
 	}
 
@@ -86,35 +94,36 @@ func (a *API) CreateCategory(w http.ResponseWriter, r *http.Request) {
 
 	id, err := a.database.CreateCategory(cat)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "Category already exists or error: "+err.Error())
+		writeError(w, http.StatusBadRequest, "Category already exists or creation failed: "+err.Error())
 		return
 	}
 	cat.ID = id
 
-	// Запускаем фоновое наполнение для новой категории
+	// Queue generation for the newly created category
 	a.worker.TriggerManual()
 
 	writeJSON(w, http.StatusCreated, cat)
 }
 
+// GetRandomQuestion retrieves a random unsolved question matching filters.
 func (a *API) GetRandomQuestion(w http.ResponseWriter, r *http.Request) {
 	categorySlug := r.URL.Query().Get("category")
 	difficulty := r.URL.Query().Get("difficulty")
 
 	q, err := a.database.GetRandomQuestion(categorySlug, difficulty)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Задач пока нет в базе. Запустите генерацию или дождитесь воркера.")
+		writeError(w, http.StatusNotFound, "No questions available yet. Trigger generation or wait for the worker.")
 		return
 	}
 
-	// Скрываем is_correct у вариантов ответов перед отправкой клиенту!
+	// Redact is_correct flags before dispatching question to the frontend
 	sanitizedOptions := make([]models.Option, len(q.Options))
 	for i, opt := range q.Options {
 		sanitizedOptions[i] = models.Option{
 			ID:         opt.ID,
 			OptionText: opt.OptionText,
 			OrderIndex: opt.OrderIndex,
-			IsCorrect:  false, // Скрыто до отправки ответа
+			IsCorrect:  false, // Obscured until answer validation
 		}
 	}
 	q.Options = sanitizedOptions
@@ -122,6 +131,7 @@ func (a *API) GetRandomQuestion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, q)
 }
 
+// SubmitAnswer validates the user's selected options and returns scoring.
 func (a *API) SubmitAnswer(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	questionID, err := strconv.ParseInt(idStr, 10, 64)
@@ -145,6 +155,7 @@ func (a *API) SubmitAnswer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// DeleteQuestion permanently deletes a question from the database.
 func (a *API) DeleteQuestion(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	questionID, err := strconv.ParseInt(idStr, 10, 64)
@@ -158,9 +169,10 @@ func (a *API) DeleteQuestion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Question deleted"})
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Question deleted successfully"})
 }
 
+// GetStats returns aggregated user statistics.
 func (a *API) GetStats(w http.ResponseWriter, r *http.Request) {
 	stats, err := a.database.GetUserStats()
 	if err != nil {
@@ -170,16 +182,18 @@ func (a *API) GetStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stats)
 }
 
+// GetWorkerStatus returns the current Ollama and background worker state.
 func (a *API) GetWorkerStatus(w http.ResponseWriter, r *http.Request) {
 	status := a.worker.GetStatus()
 	writeJSON(w, http.StatusOK, status)
 }
 
+// TriggerWorker starts an immediate batch generation run.
 func (a *API) TriggerWorker(w http.ResponseWriter, r *http.Request) {
 	triggered := a.worker.TriggerManual()
 	if triggered {
-		writeJSON(w, http.StatusOK, map[string]string{"message": "Генерация запущена"})
+		writeJSON(w, http.StatusOK, map[string]string{"message": "Batch generation initiated"})
 	} else {
-		writeJSON(w, http.StatusConflict, map[string]string{"message": "Генерация уже выполняется или стоит в очереди"})
+		writeJSON(w, http.StatusConflict, map[string]string{"message": "Generation already in progress or queued"})
 	}
 }

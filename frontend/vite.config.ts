@@ -11,7 +11,7 @@ export default defineConfig({
       manifest: {
         name: 'Tech Trainer',
         short_name: 'TechTrainer',
-        description: 'Персональный интерактивный тренажёр для программистов и инженеров',
+        description: 'Interactive practice platform for software engineers and systems developers',
         theme_color: '#0f172a',
         background_color: '#0f172a',
         display: 'standalone',

@@ -2,6 +2,7 @@ package models
 
 import "time"
 
+// Category represents a distinct topic category with prompt instructions.
 type Category struct {
 	ID                 int64     `json:"id"`
 	Slug               string    `json:"slug"`
@@ -15,6 +16,7 @@ type Category struct {
 	CreatedAt          time.Time `json:"created_at"`
 }
 
+// Option represents one of the four choices for a question.
 type Option struct {
 	ID         int64  `json:"id"`
 	QuestionID int64  `json:"question_id,omitempty"`
@@ -23,12 +25,13 @@ type Option struct {
 	OrderIndex int    `json:"order_idx"`
 }
 
+// Question represents a challenge with options and an explanation.
 type Question struct {
 	ID           int64     `json:"id"`
 	CategoryID   int64     `json:"category_id"`
 	CategorySlug string    `json:"category_slug,omitempty"`
 	CategoryName string    `json:"category_name,omitempty"`
-	Type         string    `json:"type"` // "multiple_choice" or "code_analysis"
+	Type         string    `json:"type"`       // "multiple_choice" or "code_analysis"
 	Difficulty   string    `json:"difficulty"` // "junior" or "middle"
 	QuestionText string    `json:"question_text"`
 	CodeSnippet  string    `json:"code_snippet"`
@@ -40,10 +43,12 @@ type Question struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+// SubmitAnswerRequest represents the user's selected option IDs.
 type SubmitAnswerRequest struct {
 	SelectedOptionIDs []int64 `json:"selected_option_ids"`
 }
 
+// SubmitAnswerResponse represents the result of validating a user answer.
 type SubmitAnswerResponse struct {
 	IsCorrect         bool    `json:"is_correct"`
 	Explanation       string  `json:"explanation"`
@@ -53,6 +58,7 @@ type SubmitAnswerResponse struct {
 	TotalScore        int     `json:"total_score"`
 }
 
+// UserStats represents overall user performance metrics.
 type UserStats struct {
 	TotalAnswered   int            `json:"total_answered"`
 	TotalCorrect    int            `json:"total_correct"`
@@ -62,6 +68,7 @@ type UserStats struct {
 	ByCategory      []CategoryStat `json:"by_category"`
 }
 
+// CategoryStat represents user metrics for a specific category.
 type CategoryStat struct {
 	CategoryName    string  `json:"category_name"`
 	CategorySlug    string  `json:"category_slug"`
@@ -70,6 +77,7 @@ type CategoryStat struct {
 	AccuracyPercent float64 `json:"accuracy_percent"`
 }
 
+// GeneratedQuestionDTO is the structured payload expected from Ollama.
 type GeneratedQuestionDTO struct {
 	Type           string   `json:"type"`
 	Difficulty     string   `json:"difficulty"`
@@ -77,10 +85,11 @@ type GeneratedQuestionDTO struct {
 	Code           string   `json:"code"`
 	Language       string   `json:"language"`
 	Options        []string `json:"options"`
-	CorrectIndices []int    `json:"correct_indices"` // 0-based
+	CorrectIndices []int    `json:"correct_indices"` // 0-based indices
 	Explanation    string   `json:"explanation"`
 }
 
+// OllamaStatus represents the current state of the Ollama inference engine.
 type OllamaStatus struct {
 	IsOnline   bool      `json:"is_online"`
 	ModelName  string    `json:"model_name"`

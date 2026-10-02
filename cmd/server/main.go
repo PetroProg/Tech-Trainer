@@ -36,7 +36,7 @@ func main() {
 	ollamaClient := ollama.NewClient(cfg.OllamaURL, cfg.OllamaModel)
 	bgWorker := worker.NewWorker(cfg, database, ollamaClient)
 
-	// Контекст для фонового воркера и graceful shutdown
+	// Context for graceful shutdown and background worker cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -58,7 +58,7 @@ func main() {
 		MaxAge:           300,
 	}))
 
-	// API Маршруты
+	// API Routes
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/categories", apiHandler.GetCategories)
 		r.Post("/categories", apiHandler.CreateCategory)
@@ -70,10 +70,10 @@ func main() {
 		r.Post("/worker/trigger", apiHandler.TriggerWorker)
 	})
 
-	// Статика фронтенда (SPA Fallback)
+	// Static assets serving with SPA Fallback
 	staticDir := "frontend/dist"
 	if _, err := os.Stat(staticDir); os.IsNotExist(err) {
-		staticDir = "dist" // fallback на случай другого пути
+		staticDir = "dist" // fallback path
 	}
 
 	workDir, _ := os.Getwd()
@@ -89,14 +89,14 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// Graceful shutdown
+	// Graceful shutdown listener
 	go func() {
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 		<-sigChan
 		log.Println("[Main] Shutting down gracefully...")
 
-		cancel() // останавливает воркер
+		cancel() // signals worker to stop
 
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer shutdownCancel()
@@ -114,7 +114,7 @@ func main() {
 	log.Println("[Main] Server exited cleanly.")
 }
 
-// SPA File Server: если файл не найден, отдает index.html
+// fileServer sets up a route for static file serving with Single Page Application (SPA) index fallback.
 func fileServer(r chi.Router, path string, root http.FileSystem) {
 	if strings.ContainsAny(path, "{}*") {
 		panic("FileServer does not permit any URL parameters.")
@@ -133,7 +133,7 @@ func fileServer(r chi.Router, path string, root http.FileSystem) {
 
 		f, err := root.Open(fsPath)
 		if err != nil {
-			// SPA fallback: отдаем index.html
+			// SPA fallback: return index.html
 			indexFile, errIndex := root.Open("index.html")
 			if errIndex != nil {
 				http.NotFound(w, r)

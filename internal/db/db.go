@@ -16,11 +16,13 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// DB manages SQLite database connections and operations.
 type DB struct {
 	conn *sql.DB
 	mu   sync.RWMutex
 }
 
+// Open creates or opens a SQLite database in WAL mode with optimized settings.
 func Open(dbPath string) (*DB, error) {
 	dir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -32,7 +34,7 @@ func Open(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("failed to open sqlite: %w", err)
 	}
 
-	// 1 соединение для SQLite - минимальный расход RAM и отсутствие блокировок
+	// Single connection pool ensures minimal RAM overhead and prevents SQLite locking issues
 	conn.SetMaxOpenConns(1)
 	conn.SetMaxIdleConns(1)
 
@@ -41,7 +43,7 @@ func Open(dbPath string) (*DB, error) {
 		"PRAGMA busy_timeout=5000;",
 		"PRAGMA foreign_keys=ON;",
 		"PRAGMA synchronous=NORMAL;",
-		"PRAGMA cache_size=-2000;", // ~2MB RAM
+		"PRAGMA cache_size=-2000;", // ~2MB RAM cache
 	}
 	for _, p := range pragmas {
 		if _, err := conn.Exec(p); err != nil {
@@ -57,10 +59,12 @@ func Open(dbPath string) (*DB, error) {
 	return database, nil
 }
 
+// Close terminates the database connection.
 func (d *DB) Close() error {
 	return d.conn.Close()
 }
 
+// initSchema sets up required tables, indexes, and initial categories.
 func (d *DB) initSchema() error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS categories (
@@ -124,21 +128,21 @@ func (d *DB) initSchema() error {
 		}{
 			{
 				slug: "ai-neural-networks",
-				name: "AI & Нейросети",
-				desc: "Архитектура трансформеров, механизм внимания, LoRA/QLoRA, RAG, Ollama/vLLM, векторные базы данных.",
-				prompt: "Темы: Transformer architecture (Self-Attention, KV-cache, RoPE), Fine-tuning (LoRA, QLoRA, rank, alpha), RAG (embeddings, chunking strategies, hybrid search), Inference (Ollama, vLLM, quantization GGUF/AWQ), Vector DBs (Chroma, Qdrant, Milvus, distance metrics). Уровень сложности: Junior и базовый Middle. Практические вопросы и фрагменты кода на Python (PyTorch/Transformers/LangChain) или конфигурации.",
+				name: "AI & Neural Networks",
+				desc: "Transformer architectures, attention mechanisms, LoRA/QLoRA, RAG, Ollama/vLLM, and vector databases.",
+				prompt: "Topics: Transformer architecture (Self-Attention, KV-cache, RoPE), Fine-tuning (LoRA, QLoRA, rank, alpha), RAG (embeddings, chunking strategies, hybrid search), Inference (Ollama, vLLM, quantization GGUF/AWQ), Vector DBs (Chroma, Qdrant, Milvus, distance metrics). Target level: Junior and solid Middle. Practical questions and code snippets in Python (PyTorch/Transformers/LangChain) or engine configs.",
 			},
 			{
 				slug: "devops-linux",
 				name: "DevOps & Linux",
-				desc: "Systemd, сети/iptables, Docker, Kubernetes, память/OOM, bash-скрипты, траблшутинг.",
-				prompt: "Темы: Linux internals (systemd units, journalctl, cgroups, /proc), Networking (iptables, netfilter, DNS, TCP states, curl, netstat/ss), Docker (multi-stage builds, layers, networking, security, storage), Kubernetes basics (Pods, Deployments, Services, ConfigMaps), OOM killer, exit codes, Bash debugging (set -euo pipefail, regex, sed, awk). Уровень сложности: Junior и умеренный Middle.",
+				desc: "Systemd, networking/iptables, Docker, Kubernetes, memory/OOM troubleshooting, and bash scripting.",
+				prompt: "Topics: Linux internals (systemd units, journalctl, cgroups, /proc), Networking (iptables, netfilter, DNS, TCP states, curl, ss/netstat), Docker (multi-stage builds, layers, networking, security, storage), Kubernetes basics (Pods, Deployments, Services, ConfigMaps), OOM killer, exit codes, Bash debugging (set -euo pipefail, regex, sed, awk). Target level: Junior and moderate Middle.",
 			},
 			{
 				slug: "it-languages",
-				name: "IT & Языки",
-				desc: "Go (горутины, каналы, race condition), Python (GIL, async, генераторы), Rust (ownership, lifetimes), SQL (индексы, EXPLAIN).",
-				prompt: "Темы: Golang (goroutines, channels, sync.Mutex/RWMutex, defer, interfaces, context, memory leaks), Python (GIL, asyncio, decorators, memory management, generators), Rust (ownership, borrowing, lifetimes basics, Result/Option), SQL (B-Tree indexes, compound indexes, EXPLAIN ANALYZE, transaction isolation, JOIN types). Уровень сложности: Junior и крепкий Middle. Реальные сниппеты кода с подвохом или анализом вывода.",
+				name: "Languages & Runtimes",
+				desc: "Go (goroutines, channels, race conditions), Python (GIL, async, generators), Rust (ownership, lifetimes), SQL (indexing, EXPLAIN).",
+				prompt: "Topics: Golang (goroutines, channels, sync.Mutex/RWMutex, defer, interfaces, context, memory leaks), Python (GIL, asyncio, decorators, memory management, generators), Rust (ownership, borrowing, lifetimes basics, Result/Option), SQL (B-Tree indexes, compound indexes, EXPLAIN ANALYZE, transaction isolation, JOIN types). Target level: Junior and solid Middle. Realistic code snippets testing output analysis or subtle bugs.",
 			},
 		}
 
@@ -158,6 +162,7 @@ func (d *DB) initSchema() error {
 	return nil
 }
 
+// GetCategories returns all active categories along with counts of total, solved, and available questions.
 func (d *DB) GetCategories() ([]models.Category, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -203,6 +208,7 @@ func (d *DB) GetCategories() ([]models.Category, error) {
 	return categories, nil
 }
 
+// CreateCategory inserts a new category and returns its ID.
 func (d *DB) CreateCategory(c models.Category) (int64, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -217,6 +223,7 @@ func (d *DB) CreateCategory(c models.Category) (int64, error) {
 	return res.LastInsertId()
 }
 
+// GetCategoryBySlug fetches a single category by its slug identifier.
 func (d *DB) GetCategoryBySlug(slug string) (*models.Category, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -236,6 +243,7 @@ func (d *DB) GetCategoryBySlug(slug string) (*models.Category, error) {
 	return &c, nil
 }
 
+// GetUnsolvedCountByCategory returns a map of category IDs to their unsolved question count.
 func (d *DB) GetUnsolvedCountByCategory() (map[int64]int, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -265,7 +273,7 @@ func (d *DB) GetUnsolvedCountByCategory() (map[int64]int, error) {
 	return counts, nil
 }
 
-// Выдача случайной нерешенной задачи
+// GetRandomQuestion selects a random unsolved question matching criteria, with repetition fallback.
 func (d *DB) GetRandomQuestion(categorySlug, difficulty string) (*models.Question, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -303,7 +311,7 @@ func (d *DB) GetRandomQuestion(categorySlug, difficulty string) (*models.Questio
 		&q.Language, &q.Explanation, &createdAt,
 	)
 
-	// Если нерешённых задач нет, берем повторно любую решенную задачу
+	// If no unsolved questions remain, pull from solved questions for review
 	if err == sql.ErrNoRows {
 		fallbackWhere := []string{"1=1"}
 		args = []interface{}{}
@@ -341,7 +349,7 @@ func (d *DB) GetRandomQuestion(categorySlug, difficulty string) (*models.Questio
 
 	q.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
 
-	// Загрузка вариантов ответов
+	// Fetch option choices
 	optRows, err := d.conn.Query(`
 		SELECT id, question_id, option_text, is_correct, order_idx
 		FROM options
@@ -365,6 +373,7 @@ func (d *DB) GetRandomQuestion(categorySlug, difficulty string) (*models.Questio
 	return &q, nil
 }
 
+// CalculateHash creates a SHA-256 digest of normalized question text and code snippet.
 func CalculateHash(questionText, codeSnippet string) string {
 	normalQuestion := strings.ToLower(strings.TrimSpace(questionText))
 	normalCode := strings.TrimSpace(codeSnippet)
@@ -373,7 +382,7 @@ func CalculateHash(questionText, codeSnippet string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// Сохранение сгенерированной задачи с дедупликацией по хэшу
+// SaveGeneratedQuestion writes an AI-generated question to the database with deduplication.
 func (d *DB) SaveGeneratedQuestion(dto models.GeneratedQuestionDTO, categoryID int64) (bool, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -383,7 +392,7 @@ func (d *DB) SaveGeneratedQuestion(dto models.GeneratedQuestionDTO, categoryID i
 	var existsID int64
 	err := d.conn.QueryRow("SELECT id FROM questions WHERE hash = ?", hash).Scan(&existsID)
 	if err == nil {
-		// Дубликат найден
+		// Duplicate question already exists
 		return false, nil
 	}
 
@@ -442,6 +451,7 @@ func (d *DB) SaveGeneratedQuestion(dto models.GeneratedQuestionDTO, categoryID i
 	return true, tx.Commit()
 }
 
+// SubmitAnswer evaluates selected options and calculates streak and total score.
 func (d *DB) SubmitAnswer(questionID int64, selectedIDs []int64) (*models.SubmitAnswerResponse, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -521,6 +531,7 @@ func (d *DB) SubmitAnswer(questionID int64, selectedIDs []int64) (*models.Submit
 	}, nil
 }
 
+// DeleteQuestion removes a question and cascading records.
 func (d *DB) DeleteQuestion(questionID int64) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -529,6 +540,7 @@ func (d *DB) DeleteQuestion(questionID int64) error {
 	return err
 }
 
+// GetUserStats calculates performance metrics including accuracy and category statistics.
 func (d *DB) GetUserStats() (*models.UserStats, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()

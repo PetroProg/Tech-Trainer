@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// Config holds runtime configuration values for the application.
 type Config struct {
 	Port               string
 	DBPath             string
@@ -16,6 +17,7 @@ type Config struct {
 	BatchSize          int
 }
 
+// getEnv retrieves an environment variable or returns a fallback value.
 func getEnv(key, defaultVal string) string {
 	if val, ok := os.LookupEnv(key); ok && val != "" {
 		return val
@@ -23,6 +25,7 @@ func getEnv(key, defaultVal string) string {
 	return defaultVal
 }
 
+// getEnvInt retrieves an environment variable as an integer or returns a fallback value.
 func getEnvInt(key string, defaultVal int) int {
 	if val, ok := os.LookupEnv(key); ok {
 		if intVal, err := strconv.Atoi(val); err == nil {
@@ -32,6 +35,7 @@ func getEnvInt(key string, defaultVal int) int {
 	return defaultVal
 }
 
+// Load populates the Config struct from environment variables.
 func Load() *Config {
 	hours := getEnvInt("CHECK_INTERVAL_HOURS", 4)
 	return &Config{

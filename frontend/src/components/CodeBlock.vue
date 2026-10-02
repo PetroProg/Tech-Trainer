@@ -49,8 +49,8 @@ const copyCode = async () => {
         @click="copyCode" 
         class="hover:text-slate-200 transition-colors flex items-center gap-1 text-[11px]"
       >
-        <span v-if="copied" class="text-emerald-400">Скопировано!</span>
-        <span v-else>Копировать</span>
+        <span v-if="copied" class="text-emerald-400">Copied!</span>
+        <span v-else>Copy</span>
       </button>
     </div>
     <div class="overflow-x-auto p-4 text-sm font-mono leading-relaxed">

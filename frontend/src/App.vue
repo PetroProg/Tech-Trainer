@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted } from 'vue'
 import CodeBlock from './components/CodeBlock.vue'
 import {
   getCategories,
@@ -17,7 +17,7 @@ import {
   type WorkerStatus
 } from './api'
 
-// Состояние
+// Application State
 const categories = ref<Category[]>([])
 const selectedCategory = ref<string>('all')
 const selectedDifficulty = ref<string>('all')
@@ -28,13 +28,13 @@ const loading = ref(false)
 const submitting = ref(false)
 const errorMessage = ref('')
 
-// Статистика и воркер
+// Analytics & Worker Monitor
 const stats = ref<UserStats | null>(null)
 const workerStatus = ref<WorkerStatus | null>(null)
 const showStatsModal = ref(false)
 const showCategoryModal = ref(false)
 
-// Форма создания категории
+// New Category Form State
 const newCat = ref({
   name: '',
   description: '',
@@ -42,11 +42,11 @@ const newCat = ref({
 })
 const creatingCategory = ref(false)
 
-// Загрузка первоначальных данных
+// Lifecycle
 onMounted(async () => {
   await Promise.all([loadCategories(), loadStats(), loadWorkerStatus()])
   await nextQuestion()
-  // Периодическое обновление статуса воркера раз в 15 секунд
+  // Poll worker status every 15 seconds
   setInterval(loadWorkerStatus, 15000)
 })
 
@@ -84,14 +84,14 @@ async function nextQuestion() {
     currentQuestion.value = await getRandomQuestion(selectedCategory.value, selectedDifficulty.value)
   } catch (e: any) {
     currentQuestion.value = null
-    errorMessage.value = e.message || 'Нет доступных задач'
+    errorMessage.value = e.message || 'No questions available'
   } finally {
     loading.value = false
   }
 }
 
 function toggleOption(id: number) {
-  if (answerResult.value) return // После отправки ответа кликать нельзя
+  if (answerResult.value) return // Prevent clicking after submission
   const idx = selectedOptionIds.value.indexOf(id)
   if (idx > -1) {
     selectedOptionIds.value.splice(idx, 1)
@@ -115,7 +115,7 @@ async function handleAnswer() {
       stats.value.accuracy_percent = Math.round((stats.value.total_correct / stats.value.total_answered) * 100)
     }
   } catch (e: any) {
-    alert('Ошибка отправки ответа: ' + e.message)
+    alert('Failed to submit answer: ' + e.message)
   } finally {
     submitting.value = false
   }
@@ -123,14 +123,14 @@ async function handleAnswer() {
 
 async function handleDelete() {
   if (!currentQuestion.value) return
-  if (!confirm('Удалить эту задачу из базы данных как некорректную?')) return
+  if (!confirm('Permanently delete this question from the database as invalid?')) return
 
   try {
     await deleteQuestion(currentQuestion.value.id)
     await nextQuestion()
     await loadCategories()
   } catch (e: any) {
-    alert('Ошибка удаления: ' + e.message)
+    alert('Failed to delete question: ' + e.message)
   }
 }
 
@@ -153,9 +153,9 @@ async function handleCreateCategory() {
     newCat.value = { name: '', description: '', prompt_instructions: '' }
     await loadCategories()
     await loadWorkerStatus()
-    alert('Категория успешно создана! Воркер запущен для генерации задач.')
+    alert('Category created successfully! Background generator started.')
   } catch (e: any) {
-    alert('Ошибка: ' + e.message)
+    alert('Error: ' + e.message)
   } finally {
     creatingCategory.value = false
   }
@@ -183,7 +183,7 @@ function getOptionClass(optionId: number) {
 
 <template>
   <div class="max-w-2xl mx-auto px-4 py-4 min-h-screen flex flex-col justify-between">
-    <!-- Шапка приложения -->
+    <!-- Header -->
     <header class="mb-4">
       <div class="flex items-center justify-between pb-3 border-b border-slate-800">
         <div class="flex items-center gap-2">
@@ -195,36 +195,36 @@ function getOptionClass(optionId: number) {
               Tech Trainer
               <span class="text-[10px] font-medium bg-slate-800 text-sky-400 px-2 py-0.5 rounded-full border border-slate-700">PWA</span>
             </h1>
-            <p class="text-[11px] text-slate-400">Локальный AI тренажёр для разработчиков</p>
+            <p class="text-[11px] text-slate-400">Personal AI Practice Platform for Engineers</p>
           </div>
         </div>
 
-        <!-- Трекер и кнопки -->
+        <!-- Top Status Indicators -->
         <div class="flex items-center gap-2">
-          <!-- Стрик -->
+          <!-- Streak Badge -->
           <div class="flex items-center gap-1 bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-amber-400">
             <span>🔥</span>
             <span>{{ stats?.current_streak || 0 }}</span>
           </div>
 
-          <!-- Очки -->
+          <!-- Total Score -->
           <div class="flex items-center gap-1 bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-sky-400">
             <span>⭐</span>
             <span>{{ stats?.total_score || 0 }}</span>
           </div>
 
-          <!-- Кнопка статистики -->
+          <!-- Stats Button -->
           <button 
             @click="showStatsModal = true"
             class="p-2 bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 rounded-xl text-xs transition"
-            title="Статистика"
+            title="Statistics"
           >
             📊
           </button>
         </div>
       </div>
 
-      <!-- Статус Ollama Worker -->
+      <!-- Worker Heartbeat Status Banner -->
       <div class="mt-2.5 flex items-center justify-between text-xs px-3 py-1.5 rounded-lg bg-slate-900/60 border border-slate-800/80">
         <div class="flex items-center gap-2">
           <span 
@@ -234,7 +234,7 @@ function getOptionClass(optionId: number) {
           <span class="text-slate-400 text-[11px]">
             Ollama RTX 3060:
             <b class="text-slate-200">
-              {{ workerStatus?.is_running ? 'Генерация...' : (workerStatus?.is_online ? 'Онлайн' : 'Офлайн (спит)') }}
+              {{ workerStatus?.is_running ? 'Generating batch...' : (workerStatus?.is_online ? 'Online' : 'Offline (sleeping)') }}
             </b>
           </span>
         </div>
@@ -243,18 +243,18 @@ function getOptionClass(optionId: number) {
           @click="handleTriggerGeneration"
           class="text-[11px] text-sky-400 hover:text-sky-300 font-medium flex items-center gap-1"
         >
-          <span>↻ Сгенерировать пачку</span>
+          <span>↻ Generate Batch</span>
         </button>
       </div>
 
-      <!-- Горизонтальный скролл категорий -->
+      <!-- Category Filter Pills -->
       <div class="mt-3 flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar text-xs">
         <button
           @click="selectedCategory = 'all'; nextQuestion()"
           class="whitespace-nowrap px-3 py-1.5 rounded-xl font-medium transition"
           :class="selectedCategory === 'all' ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25' : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'"
         >
-          Все темы
+          All Topics
         </button>
 
         <button
@@ -277,45 +277,45 @@ function getOptionClass(optionId: number) {
           @click="showCategoryModal = true"
           class="whitespace-nowrap px-3 py-1.5 rounded-xl font-medium bg-slate-800/80 border border-dashed border-slate-700 text-sky-400 hover:border-sky-500 hover:text-sky-300 transition"
         >
-          + Категория
+          + Category
         </button>
       </div>
     </header>
 
-    <!-- Основное тело тренажёра -->
+    <!-- Main Workspace -->
     <main class="flex-1 flex flex-col justify-center">
-      <!-- Загрузка -->
+      <!-- Loading State -->
       <div v-if="loading" class="text-center py-20">
         <div class="inline-block w-8 h-8 border-2 border-sky-400 border-t-transparent rounded-full animate-spin"></div>
-        <p class="mt-3 text-sm text-slate-400">Подбор задачи из пула...</p>
+        <p class="mt-3 text-sm text-slate-400">Fetching challenge from pool...</p>
       </div>
 
-      <!-- Ошибка / Пустой пул -->
+      <!-- Empty State -->
       <div v-else-if="errorMessage || !currentQuestion" class="p-6 text-center bg-slate-900/80 border border-slate-800 rounded-2xl">
         <div class="text-4xl mb-2">📦</div>
-        <h3 class="text-base font-semibold text-slate-200">Нет доступных задач</h3>
+        <h3 class="text-base font-semibold text-slate-200">No Questions Available</h3>
         <p class="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-          {{ errorMessage || 'В базе данных пока нет нерешённых задач по выбранным фильтрам.' }}
+          {{ errorMessage || 'There are currently no unanswered questions in this category.' }}
         </p>
         <div class="mt-4 flex justify-center gap-2">
           <button 
             @click="handleTriggerGeneration" 
             class="px-4 py-2 bg-sky-500 hover:bg-sky-400 text-white rounded-xl text-xs font-semibold shadow-lg shadow-sky-500/20"
           >
-            Сгенерировать сейчас
+            Generate Now
           </button>
           <button 
             @click="selectedCategory = 'all'; nextQuestion()" 
             class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold"
           >
-            Сбросить фильтр
+            Reset Filters
           </button>
         </div>
       </div>
 
-      <!-- Карточка задачи -->
+      <!-- Active Quiz Card -->
       <div v-else class="bg-slate-900/90 border border-slate-800/90 rounded-2xl p-5 shadow-2xl backdrop-blur-sm">
-        <!-- Метаданные вопроса -->
+        <!-- Metadata Row -->
         <div class="flex items-center justify-between mb-3 text-[11px]">
           <div class="flex items-center gap-2">
             <span class="px-2.5 py-0.5 rounded-full font-semibold bg-sky-950 text-sky-400 border border-sky-800/50">
@@ -330,23 +330,23 @@ function getOptionClass(optionId: number) {
           </div>
 
           <span class="text-slate-400 font-medium">
-            Правильных: 1–4
+            1–4 Correct Answers
           </span>
         </div>
 
-        <!-- Текст вопроса -->
+        <!-- Question Prompt -->
         <h2 class="text-base sm:text-lg font-medium text-slate-100 leading-snug">
           {{ currentQuestion.question_text }}
         </h2>
 
-        <!-- Фрагмент кода (если есть) -->
+        <!-- Code Snippet -->
         <CodeBlock 
           v-if="currentQuestion.code_snippet" 
           :code="currentQuestion.code_snippet" 
           :language="currentQuestion.language" 
         />
 
-        <!-- Варианты ответа (ровно 4) -->
+        <!-- 4 Option Cards -->
         <div class="mt-4 space-y-2.5">
           <div
             v-for="opt in currentQuestion.options"
@@ -355,7 +355,7 @@ function getOptionClass(optionId: number) {
             class="flex items-start gap-3 p-3.5 rounded-xl border transition-all cursor-pointer select-none text-sm"
             :class="getOptionClass(opt.id)"
           >
-            <!-- Индикатор выбора / чекбокс -->
+            <!-- Custom Checkbox Indicator -->
             <div 
               class="w-5 h-5 rounded-md border flex items-center justify-center shrink-0 mt-0.5 transition-colors"
               :class="selectedOptionIds.includes(opt.id) ? 'bg-sky-500 border-sky-400 text-white' : 'border-slate-700 bg-slate-800/50'"
@@ -370,7 +370,7 @@ function getOptionClass(optionId: number) {
           </div>
         </div>
 
-        <!-- Кнопка проверки / Разбор -->
+        <!-- Submit & Explanation Footer -->
         <div class="mt-5">
           <button
             v-if="!answerResult"
@@ -381,11 +381,11 @@ function getOptionClass(optionId: number) {
               ? 'bg-sky-500 hover:bg-sky-400 text-white shadow-sky-500/25 active:scale-[0.99]' 
               : 'bg-slate-800 text-slate-500 cursor-not-allowed'"
           >
-            <span v-if="submitting">Проверка...</span>
-            <span v-else>Ответить ({{ selectedOptionIds.length }})</span>
+            <span v-if="submitting">Checking...</span>
+            <span v-else>Submit Answer ({{ selectedOptionIds.length }})</span>
           </button>
 
-          <!-- Блок результатов и объяснения -->
+          <!-- Results & Explanation Container -->
           <div v-else class="space-y-4 animate-fade-in">
             <div 
               class="p-4 rounded-xl border flex items-center gap-3"
@@ -394,39 +394,39 @@ function getOptionClass(optionId: number) {
               <span class="text-2xl">{{ answerResult.is_correct ? '🎉' : '❌' }}</span>
               <div>
                 <h4 class="font-bold text-sm">
-                  {{ answerResult.is_correct ? 'Абсолютно верно!' : 'Есть ошибки в ответе' }}
+                  {{ answerResult.is_correct ? 'Spot on! Perfect answer.' : 'Incorrect selection.' }}
                 </h4>
                 <p class="text-xs opacity-90">
-                  {{ answerResult.is_correct ? '+10 очков в копилку' : 'Разберите объяснение ниже и двигайтесь дальше' }}
+                  {{ answerResult.is_correct ? '+10 score points awarded' : 'Review the breakdown below and keep moving forward' }}
                 </p>
               </div>
             </div>
 
-            <!-- Подробный AI разбор -->
+            <!-- Deep AI Explanation -->
             <div class="p-4 bg-slate-950 border border-slate-800 rounded-xl text-xs leading-relaxed text-slate-300">
               <div class="flex items-center gap-1.5 text-sky-400 font-semibold mb-2">
                 <span>💡</span>
-                <span>Разбор решения (AI Explanation):</span>
+                <span>AI Solution Breakdown:</span>
               </div>
               <div class="whitespace-pre-wrap font-sans text-slate-200">
                 {{ answerResult.explanation }}
               </div>
             </div>
 
-            <!-- Действия: Следующая задача + Удалить -->
+            <!-- Actions Row -->
             <div class="flex items-center gap-2">
               <button
                 @click="nextQuestion"
                 class="flex-1 py-3 px-4 bg-sky-500 hover:bg-sky-400 text-white font-semibold text-sm rounded-xl transition shadow-lg shadow-sky-500/20 active:scale-[0.99] flex items-center justify-center gap-2"
               >
-                <span>Следующая задача</span>
+                <span>Next Question</span>
                 <span>→</span>
               </button>
 
               <button
                 @click="handleDelete"
                 class="p-3 bg-slate-800/80 hover:bg-rose-900/40 hover:border-rose-700/60 border border-slate-700 text-slate-400 hover:text-rose-300 rounded-xl transition"
-                title="Пожаловаться и удалить задачу из базы"
+                title="Report and delete question from database"
               >
                 🗑️
               </button>
@@ -436,49 +436,49 @@ function getOptionClass(optionId: number) {
       </div>
     </main>
 
-    <!-- Футер -->
+    <!-- Footer -->
     <footer class="mt-6 text-center text-[11px] text-slate-500">
       Self-hosted on <code class="text-slate-400">petroprog</code> • Tailscale Mesh • Powered by Qwen 2.5
     </footer>
 
-    <!-- Модальное окно создания новой категории -->
+    <!-- New Category Modal -->
     <div v-if="showCategoryModal" class="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
       <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md w-full shadow-2xl">
         <h3 class="text-base font-bold text-slate-100 flex items-center gap-2">
           <span>📂</span>
-          <span>Новая категория задач</span>
+          <span>New Question Category</span>
         </h3>
         <p class="text-xs text-slate-400 mt-1">
-          Добавьте направление. Воркер начнет генерировать под него практические задачи через Ollama.
+          Define a technical domain. The local AI worker will begin generating practical challenges for it.
         </p>
 
         <form @submit.prevent="handleCreateCategory" class="mt-4 space-y-3">
           <div>
-            <label class="block text-xs font-medium text-slate-300 mb-1">Название категории</label>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Category Title</label>
             <input 
               v-model="newCat.name" 
-              placeholder="например: Кибербезопасность или Go Advanced" 
+              placeholder="e.g. Cybersecurity, Rust Systems, Kubernetes" 
               required
               class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500"
             />
           </div>
 
           <div>
-            <label class="block text-xs font-medium text-slate-300 mb-1">Краткое описание</label>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Short Description</label>
             <input 
               v-model="newCat.description" 
-              placeholder="Сетевые атаки, XSS, CSRF, TLS, криптография..." 
+              placeholder="Network security, TLS handshake, exploits, privilege escalation..." 
               required
               class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500"
             />
           </div>
 
           <div>
-            <label class="block text-xs font-medium text-slate-300 mb-1">Инструкция для промпта Ollama</label>
+            <label class="block text-xs font-medium text-slate-300 mb-1">AI Prompt Instructions</label>
             <textarea 
               v-model="newCat.prompt_instructions" 
               rows="3"
-              placeholder="Темы: SQL-инъекции, анализ pcap, auth bypass. Стек: Python, Bash. Сложность: Junior-Middle." 
+              placeholder="Topics: SQL injection, pcap analysis, auth bypass. Stack: Python, Bash. Level: Junior-Middle." 
               required
               class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500 leading-relaxed"
             ></textarea>
@@ -490,27 +490,27 @@ function getOptionClass(optionId: number) {
               @click="showCategoryModal = false"
               class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium"
             >
-              Отмена
+              Cancel
             </button>
             <button 
               type="submit" 
               :disabled="creatingCategory"
               class="px-4 py-2 bg-sky-500 hover:bg-sky-400 text-white rounded-xl text-xs font-semibold shadow-md shadow-sky-500/20"
             >
-              {{ creatingCategory ? 'Создание...' : 'Создать категорию' }}
+              {{ creatingCategory ? 'Creating...' : 'Create Category' }}
             </button>
           </div>
         </form>
       </div>
     </div>
 
-    <!-- Модальное окно статистики -->
+    <!-- Statistics Modal -->
     <div v-if="showStatsModal" class="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
       <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md w-full shadow-2xl">
         <div class="flex items-center justify-between pb-3 border-b border-slate-800">
           <h3 class="text-base font-bold text-slate-100 flex items-center gap-2">
             <span>📊</span>
-            <span>Ваша статистика</span>
+            <span>Your Performance</span>
           </h3>
           <button @click="showStatsModal = false" class="text-slate-400 hover:text-white text-lg">✕</button>
         </div>
@@ -518,21 +518,21 @@ function getOptionClass(optionId: number) {
         <div class="mt-4 grid grid-cols-3 gap-2 text-center">
           <div class="p-3 bg-slate-950 border border-slate-800 rounded-xl">
             <div class="text-xl font-bold text-sky-400">{{ stats?.total_answered || 0 }}</div>
-            <div class="text-[10px] text-slate-400 mt-0.5">Всего ответов</div>
+            <div class="text-[10px] text-slate-400 mt-0.5">Answered</div>
           </div>
           <div class="p-3 bg-slate-950 border border-slate-800 rounded-xl">
             <div class="text-xl font-bold text-emerald-400">{{ stats?.accuracy_percent || 0 }}%</div>
-            <div class="text-[10px] text-slate-400 mt-0.5">Точность</div>
+            <div class="text-[10px] text-slate-400 mt-0.5">Accuracy</div>
           </div>
           <div class="p-3 bg-slate-950 border border-slate-800 rounded-xl">
             <div class="text-xl font-bold text-amber-400">{{ stats?.current_streak || 0 }}</div>
-            <div class="text-[10px] text-slate-400 mt-0.5">Текущий стрик</div>
+            <div class="text-[10px] text-slate-400 mt-0.5">Streak</div>
           </div>
         </div>
 
-        <!-- Статистика по категориям -->
+        <!-- Category Breakdown -->
         <div class="mt-4">
-          <h4 class="text-xs font-semibold text-slate-300 mb-2">По категориям:</h4>
+          <h4 class="text-xs font-semibold text-slate-300 mb-2">By Category:</h4>
           <div class="space-y-2 max-h-48 overflow-y-auto">
             <div 
               v-for="cs in stats?.by_category" 
@@ -541,14 +541,14 @@ function getOptionClass(optionId: number) {
             >
               <div>
                 <div class="font-medium text-slate-200">{{ cs.category_name }}</div>
-                <div class="text-[10px] text-slate-400">Решено: {{ cs.total_correct }} из {{ cs.total_answered }}</div>
+                <div class="text-[10px] text-slate-400">Solved: {{ cs.total_correct }} of {{ cs.total_answered }}</div>
               </div>
               <div class="font-bold text-sky-400">
                 {{ Math.round(cs.accuracy_percent) }}%
               </div>
             </div>
             <div v-if="!stats?.by_category?.length" class="text-center text-xs text-slate-500 py-3">
-              Вы пока не решили ни одной задачи
+              You haven't answered any questions yet
             </div>
           </div>
         </div>
@@ -557,7 +557,7 @@ function getOptionClass(optionId: number) {
           @click="showStatsModal = false"
           class="w-full mt-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium"
         >
-          Закрыть
+          Close
         </button>
       </div>
     </div>
