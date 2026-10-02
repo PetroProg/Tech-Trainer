@@ -1,0 +1,24 @@
+services:
+  tech-trainer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tech-trainer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - DB_PATH=/data/trainer.db
+      - OLLAMA_URL=http://100.114.251.81:11434
+      - OLLAMA_MODEL=qwen2.5:7b
+      - CHECK_INTERVAL_HOURS=4
+      - MIN_CATEGORY_BUFFER=15
+      - BATCH_SIZE=50
+    volumes:
+      - ./data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: '0.80'
+          memory: 120M

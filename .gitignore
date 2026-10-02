@@ -1,0 +1,29 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+tech-trainer
+
+# Data and SQLite
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/*.db-journal
+
+# Environment
+.env
+
+# Node & Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.cache/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
