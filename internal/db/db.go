@@ -100,7 +100,7 @@ func (d *DB) initSchema() error {
 
 	CREATE TABLE IF NOT EXISTS user_answers (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+		question_id INTEGER REFERENCES questions(id) ON DELETE SET NULL,
 		selected_option_ids TEXT NOT NULL, -- JSON array
 		is_correct INTEGER NOT NULL,
 		answered_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -110,12 +110,17 @@ func (d *DB) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_questions_hash ON questions(hash);
 	CREATE INDEX IF NOT EXISTS idx_options_question ON options(question_id);
 	CREATE INDEX IF NOT EXISTS idx_user_answers_question ON user_answers(question_id);
+	CREATE INDEX IF NOT EXISTS idx_user_answers_time ON user_answers(answered_at);
 	`
 
 	_, err := d.conn.Exec(schema)
 	if err != nil {
 		return err
 	}
+
+	// Safe column migration for category_id
+	_, _ = d.conn.Exec(`ALTER TABLE user_answers ADD COLUMN category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL;`)
+	_, _ = d.conn.Exec(`CREATE INDEX IF NOT EXISTS idx_user_answers_category ON user_answers(category_id);`)
 
 	var count int
 	if err := d.conn.QueryRow("SELECT COUNT(*) FROM categories").Scan(&count); err != nil {
@@ -160,6 +165,30 @@ func (d *DB) initSchema() error {
 	}
 
 	return nil
+}
+
+// PruneExpiredQuestions removes questions that meet BOTH conditions:
+// 1. The user has submitted an answer to the question.
+// 2. At least 1 day (24 hours) has elapsed since the answer was submitted.
+// Questions that are unanswered OR solved less than 1 day ago remain strictly in the database.
+func (d *DB) PruneExpiredQuestions() (int64, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	query := `
+	DELETE FROM questions 
+	WHERE id IN (
+		SELECT q.id FROM questions q
+		JOIN user_answers ua ON q.id = ua.question_id
+		GROUP BY q.id
+		HAVING MAX(ua.answered_at) <= datetime('now', '-1 day')
+	);
+	`
+	res, err := d.conn.Exec(query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // GetCategories returns all active categories along with counts of total, solved, and available questions.
@@ -243,43 +272,13 @@ func (d *DB) GetCategoryBySlug(slug string) (*models.Category, error) {
 	return &c, nil
 }
 
-// GetUnsolvedCountByCategory returns a map of category IDs to their unsolved question count.
-func (d *DB) GetUnsolvedCountByCategory() (map[int64]int, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	query := `
-	SELECT c.id, (COUNT(DISTINCT q.id) - COUNT(DISTINCT ua.question_id)) AS unsolved_count
-	FROM categories c
-	LEFT JOIN questions q ON c.id = q.category_id
-	LEFT JOIN user_answers ua ON q.id = ua.question_id
-	WHERE c.is_active = 1
-	GROUP BY c.id
-	`
-	rows, err := d.conn.Query(query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	counts := make(map[int64]int)
-	for rows.Next() {
-		var catID int64
-		var unsolved int
-		if err := rows.Scan(&catID, &unsolved); err == nil {
-			counts[catID] = unsolved
-		}
-	}
-	return counts, nil
-}
-
 // GetRandomQuestion selects a random unsolved question matching criteria, with repetition fallback.
 func (d *DB) GetRandomQuestion(categorySlug, difficulty string) (*models.Question, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
 	whereClauses := []string{
-		"q.id NOT IN (SELECT question_id FROM user_answers)",
+		"q.id NOT IN (SELECT question_id FROM user_answers WHERE question_id IS NOT NULL)",
 	}
 	args := []interface{}{}
 
@@ -311,7 +310,7 @@ func (d *DB) GetRandomQuestion(categorySlug, difficulty string) (*models.Questio
 		&q.Language, &q.Explanation, &createdAt,
 	)
 
-	// If no unsolved questions remain, pull from solved questions for review
+	// If no unsolved questions remain, pull from questions currently in the DB for review
 	if err == sql.ErrNoRows {
 		fallbackWhere := []string{"1=1"}
 		args = []interface{}{}
@@ -457,7 +456,8 @@ func (d *DB) SubmitAnswer(questionID int64, selectedIDs []int64) (*models.Submit
 	defer d.mu.Unlock()
 
 	var explanation string
-	err := d.conn.QueryRow("SELECT explanation FROM questions WHERE id = ?", questionID).Scan(&explanation)
+	var categoryID int64
+	err := d.conn.QueryRow("SELECT explanation, category_id FROM questions WHERE id = ?", questionID).Scan(&explanation, &categoryID)
 	if err != nil {
 		return nil, err
 	}
@@ -495,9 +495,9 @@ func (d *DB) SubmitAnswer(questionID int64, selectedIDs []int64) (*models.Submit
 	}
 
 	_, err = d.conn.Exec(`
-		INSERT INTO user_answers (question_id, selected_option_ids, is_correct)
-		VALUES (?, ?, ?)
-	`, questionID, string(selectedJSON), isCorrectInt)
+		INSERT INTO user_answers (question_id, category_id, selected_option_ids, is_correct)
+		VALUES (?, ?, ?, ?)
+	`, questionID, categoryID, string(selectedJSON), isCorrectInt)
 	if err != nil {
 		return nil, err
 	}
@@ -576,14 +576,14 @@ func (d *DB) GetUserStats() (*models.UserStats, error) {
 		}
 	}
 
+	// Persistent category metrics based on user_answers even after questions expire
 	catRows, err := d.conn.Query(`
 		SELECT 
 			c.name, c.slug,
 			COUNT(ua.id) AS answered,
 			SUM(CASE WHEN ua.is_correct = 1 THEN 1 ELSE 0 END) AS correct
 		FROM categories c
-		JOIN questions q ON c.id = q.category_id
-		JOIN user_answers ua ON q.id = ua.question_id
+		JOIN user_answers ua ON c.id = ua.category_id
 		GROUP BY c.id
 	`)
 	if err == nil {

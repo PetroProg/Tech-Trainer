@@ -14,7 +14,7 @@ import (
 	"github.com/PetroProg/tech-trainer/internal/ollama"
 )
 
-// Worker coordinates periodic health checks and on-demand batch question generation.
+// Worker coordinates periodic checks, question pruning, and on-demand batch generation.
 type Worker struct {
 	cfg          *config.Config
 	database     *db.DB
@@ -39,7 +39,8 @@ func NewWorker(cfg *config.Config, database *db.DB, ollamaClient *ollama.Client)
 
 // Start begins the background check loop and scheduled tickers.
 func (w *Worker) Start(ctx context.Context) {
-	log.Printf("[Worker] Starting background worker. Check interval: %v", w.cfg.CheckIntervalHours)
+	log.Printf("[Worker] Starting background worker. Check interval: %v, Threshold: < %d, Batch: %d/category",
+		w.cfg.CheckIntervalHours, w.cfg.MinCategoryBuffer, w.cfg.BatchSize)
 
 	// Execute initial check 5 seconds after launch
 	go func() {
@@ -67,7 +68,7 @@ func (w *Worker) Start(ctx context.Context) {
 	}
 }
 
-// TriggerManual signals the worker to start an immediate check and generation run.
+// TriggerManual signals the worker to start an immediate check and refill if any category is below threshold.
 func (w *Worker) TriggerManual() bool {
 	select {
 	case w.triggerChan <- struct{}{}:
@@ -97,7 +98,7 @@ func (w *Worker) updateStatus(online, running bool, result string) {
 	}
 }
 
-// checkAndGenerate verifies Ollama availability and initiates batch generation when needed.
+// checkAndGenerate enforces the question retention policy and triggers Ollama ONLY when a category has < 15 questions.
 func (w *Worker) checkAndGenerate(ctx context.Context, source string) {
 	w.mu.Lock()
 	if w.status.IsRunning {
@@ -107,24 +108,25 @@ func (w *Worker) checkAndGenerate(ctx context.Context, source string) {
 	}
 	w.mu.Unlock()
 
-	isOnline := w.ollamaClient.Ping(ctx)
-	w.updateStatus(isOnline, false, "")
-
-	if !isOnline {
-		log.Printf("[Worker] Ollama is offline (%s). Will retry later.", w.cfg.OllamaURL)
-		w.updateStatus(false, false, fmt.Sprintf("Ollama unreachable at %s", w.cfg.OllamaURL))
-		return
+	// 1. Mandatory retention cleanup:
+	// A question is removed from the database ONLY IF:
+	// - The user has answered it.
+	// - AND at least 1 day has passed after its solution.
+	pruned, err := w.database.PruneExpiredQuestions()
+	if err != nil {
+		log.Printf("[Worker] Error pruning expired questions: %v", err)
+	} else if pruned > 0 {
+		log.Printf("[Worker] Pruned %d expired questions (answered > 24 hours ago)", pruned)
 	}
 
-	log.Printf("[Worker] Ollama is online! Checking category buffers (source: %s)...", source)
-
+	// 2. Query category counts
 	categories, err := w.database.GetCategories()
 	if err != nil {
 		log.Printf("[Worker] Failed to query categories: %v", err)
 		return
 	}
 
-	// Identify categories requiring refill (< MinCategoryBuffer)
+	// 3. Identify categories where available (unanswered) questions < 15
 	var needRefill []models.Category
 	for _, c := range categories {
 		if c.AvailableQuestions < w.cfg.MinCategoryBuffer {
@@ -132,80 +134,93 @@ func (w *Worker) checkAndGenerate(ctx context.Context, source string) {
 		}
 	}
 
-	if len(needRefill) == 0 && source == "periodic_ticker" {
-		log.Printf("[Worker] All categories have >= %d questions. No refill needed.", w.cfg.MinCategoryBuffer)
-		w.updateStatus(true, false, "Question buffer healthy across all categories")
+	// STRICT RULE: Launch Ollama ONLY when a category has < 15 questions left!
+	if len(needRefill) == 0 {
+		log.Printf("[Worker] All categories have >= %d questions. Ollama will not be launched. (source: %s)",
+			w.cfg.MinCategoryBuffer, source)
+		w.updateStatus(true, false, fmt.Sprintf("All categories healthy (>= %d questions). Ollama idle.", w.cfg.MinCategoryBuffer))
 		return
 	}
 
-	// If triggered manually and all categories are above threshold, distribute evenly across all
-	targets := needRefill
-	if len(targets) == 0 {
-		targets = categories
+	// 4. Verify Ollama connectivity
+	isOnline := w.ollamaClient.Ping(ctx)
+	w.updateStatus(isOnline, false, "")
+
+	if !isOnline {
+		log.Printf("[Worker] Category refill needed (< %d), but Ollama is offline (%s). Will retry later.",
+			w.cfg.MinCategoryBuffer, w.cfg.OllamaURL)
+		w.updateStatus(false, false, fmt.Sprintf("Ollama unreachable at %s (refill pending for %d categories)", w.cfg.OllamaURL, len(needRefill)))
+		return
 	}
 
-	w.updateStatus(true, true, fmt.Sprintf("Generating batch (target: %d)...", w.cfg.BatchSize))
-	w.generateBatch(ctx, targets)
+	log.Printf("[Worker] Ollama is online! %d categories have < %d questions. Launching generator (50 questions per category)...",
+		len(needRefill), w.cfg.MinCategoryBuffer)
+
+	w.updateStatus(true, true, fmt.Sprintf("Generating 50 questions per category for %d categories...", len(needRefill)))
+	w.generateCategoryBatches(ctx, needRefill)
 }
 
-// generateBatch produces questions in round-robin fashion across target categories.
-func (w *Worker) generateBatch(ctx context.Context, categories []models.Category) {
+// generateCategoryBatches produces 50 questions specifically for each category requiring replenishment.
+func (w *Worker) generateCategoryBatches(ctx context.Context, categories []models.Category) {
 	if len(categories) == 0 {
-		w.updateStatus(true, false, "No active categories available")
+		w.updateStatus(true, false, "No categories requiring refill")
 		return
 	}
 
-	totalToGenerate := w.cfg.BatchSize
-	generatedCount := 0
-	savedCount := 0
+	targetPerCategory := w.cfg.BatchSize // 50 questions per category
+	totalGenerated := 0
+	totalSaved := 0
 
 	difficulties := []string{"junior", "junior", "middle"} // 2/3 Junior, 1/3 Middle
 
-	log.Printf("[Worker] Starting batch generation: target=%d questions across %d categories", totalToGenerate, len(categories))
+	for _, cat := range categories {
+		log.Printf("[Worker] Generating %d questions for category '%s'...", targetPerCategory, cat.Name)
+		catSaved := 0
 
-	for i := 0; i < totalToGenerate; i++ {
-		select {
-		case <-ctx.Done():
-			w.updateStatus(true, false, "Generation canceled (shutdown)")
-			return
-		default:
-		}
-
-		cat := categories[i%len(categories)]
-		diff := difficulties[rand.Intn(len(difficulties))]
-
-		genCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
-		dto, err := w.ollamaClient.GenerateQuestion(genCtx, cat.Name, cat.PromptInstructions, diff)
-		cancel()
-
-		if err != nil {
-			log.Printf("[Worker] Error generating question for '%s': %v", cat.Name, err)
-			if !w.ollamaClient.Ping(ctx) {
-				log.Println("[Worker] Ollama disconnected mid-batch. Halting.")
-				w.updateStatus(false, false, "Ollama disconnected during generation")
+		for i := 0; i < targetPerCategory; i++ {
+			select {
+			case <-ctx.Done():
+				w.updateStatus(true, false, "Generation canceled (shutdown)")
 				return
+			default:
 			}
-			time.Sleep(2 * time.Second)
-			continue
-		}
 
-		generatedCount++
-		saved, err := w.database.SaveGeneratedQuestion(*dto, cat.ID)
-		if err != nil {
-			log.Printf("[Worker] Failed to save question: %v", err)
-		} else if saved {
-			savedCount++
-			log.Printf("[Worker] [%d/%d] Saved question for '%s' (%s, answers=%d)", 
-				savedCount, totalToGenerate, cat.Name, dto.Difficulty, len(dto.CorrectIndices))
-		} else {
-			log.Printf("[Worker] Duplicate question skipped for '%s'", cat.Name)
-		}
+			diff := difficulties[rand.Intn(len(difficulties))]
 
-		// 1-second pause to prevent GPU thermal spikes
-		time.Sleep(1 * time.Second)
+			genCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+			dto, err := w.ollamaClient.GenerateQuestion(genCtx, cat.Name, cat.PromptInstructions, diff)
+			cancel()
+
+			if err != nil {
+				log.Printf("[Worker] Error generating question for '%s': %v", cat.Name, err)
+				if !w.ollamaClient.Ping(ctx) {
+					log.Println("[Worker] Ollama disconnected mid-batch. Halting.")
+					w.updateStatus(false, false, "Ollama disconnected during generation")
+					return
+				}
+				time.Sleep(2 * time.Second)
+				continue
+			}
+
+			totalGenerated++
+			saved, err := w.database.SaveGeneratedQuestion(*dto, cat.ID)
+			if err != nil {
+				log.Printf("[Worker] Failed to save question: %v", err)
+			} else if saved {
+				catSaved++
+				totalSaved++
+				log.Printf("[Worker] [%s %d/%d] Saved question (%s, answers=%d)",
+					cat.Name, catSaved, targetPerCategory, dto.Difficulty, len(dto.CorrectIndices))
+			} else {
+				log.Printf("[Worker] Duplicate question skipped for '%s'", cat.Name)
+			}
+
+			// 1-second pause to prevent thermal saturation of GPU
+			time.Sleep(1 * time.Second)
+		}
 	}
 
-	resultMsg := fmt.Sprintf("Success: generated %d, saved %d new unique questions", generatedCount, savedCount)
-	log.Printf("[Worker] Batch finished. %s", resultMsg)
+	resultMsg := fmt.Sprintf("Batch complete: generated %d, saved %d questions across %d categories", totalGenerated, totalSaved, len(categories))
+	log.Printf("[Worker] %s", resultMsg)
 	w.updateStatus(true, false, resultMsg)
 }

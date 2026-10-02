@@ -99,7 +99,7 @@ func (a *API) CreateCategory(w http.ResponseWriter, r *http.Request) {
 	}
 	cat.ID = id
 
-	// Queue generation for the newly created category
+	// Queue generation for the newly created category (it starts with 0 questions < 15)
 	a.worker.TriggerManual()
 
 	writeJSON(w, http.StatusCreated, cat)
@@ -188,12 +188,12 @@ func (a *API) GetWorkerStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, status)
 }
 
-// TriggerWorker starts an immediate batch generation run.
+// TriggerWorker starts an immediate check and refill if any category has < 15 questions.
 func (a *API) TriggerWorker(w http.ResponseWriter, r *http.Request) {
 	triggered := a.worker.TriggerManual()
 	if triggered {
-		writeJSON(w, http.StatusOK, map[string]string{"message": "Batch generation initiated"})
+		writeJSON(w, http.StatusOK, map[string]string{"message": "Check triggered. If any category has < 15 questions, Ollama will generate 50 questions."})
 	} else {
-		writeJSON(w, http.StatusConflict, map[string]string{"message": "Generation already in progress or queued"})
+		writeJSON(w, http.StatusConflict, map[string]string{"message": "Worker is currently running or a check is already queued."})
 	}
 }
