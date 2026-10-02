@@ -98,4 +98,4 @@ Access the application in your browser:
 ---
 
 ## 🔒 License
-Private personal project. All rights reserved.
+Project done with AI. [LICENSE](./LICENSE)
