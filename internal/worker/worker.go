@@ -39,18 +39,11 @@ func NewWorker(cfg *config.Config, database *db.DB, ollamaClient *ollama.Client)
 
 // Start begins the background check loop and scheduled tickers.
 func (w *Worker) Start(ctx context.Context) {
-	log.Printf("[Worker] Starting background worker. Check interval: %v, Threshold: < %d, Batch: %d/category",
+	log.Printf("[Worker] Background worker started. Check interval: %v, Threshold: < %d, Target pool: %d/category",
 		w.cfg.CheckIntervalHours, w.cfg.MinCategoryBuffer, w.cfg.BatchSize)
 
-	// Execute initial check 5 seconds after launch
-	go func() {
-		select {
-		case <-time.After(5 * time.Second):
-			w.checkAndGenerate(ctx, "startup")
-		case <-ctx.Done():
-			return
-		}
-	}()
+	// Note: We do NOT aggressively trigger GPU generation on startup.
+	// The GPU remains completely asleep unless tasks drop below threshold or manual trigger is used.
 
 	ticker := time.NewTicker(w.cfg.CheckIntervalHours)
 	defer ticker.Stop()
@@ -153,31 +146,47 @@ func (w *Worker) checkAndGenerate(ctx context.Context, source string) {
 		return
 	}
 
-	log.Printf("[Worker] Ollama is online! %d categories have < %d questions. Launching generator (50 questions per category)...",
-		len(needRefill), w.cfg.MinCategoryBuffer)
+	log.Printf("[Worker] Ollama is online! %d categories have < %d questions. Refilling up to %d questions...",
+		len(needRefill), w.cfg.MinCategoryBuffer, w.cfg.BatchSize)
 
-	w.updateStatus(true, true, fmt.Sprintf("Generating 50 questions per category for %d categories...", len(needRefill)))
+	w.updateStatus(true, true, fmt.Sprintf("Refilling pool up to %d questions for %d categories...", w.cfg.BatchSize, len(needRefill)))
 	w.generateCategoryBatches(ctx, needRefill)
 }
 
-// generateCategoryBatches produces 50 questions specifically for each category requiring replenishment.
+// generateCategoryBatches produces questions to top up categories up to the batch size (50).
 func (w *Worker) generateCategoryBatches(ctx context.Context, categories []models.Category) {
 	if len(categories) == 0 {
 		w.updateStatus(true, false, "No categories requiring refill")
 		return
 	}
 
-	targetPerCategory := w.cfg.BatchSize // 50 questions per category
+	// Ensure GPU VRAM is completely freed after batch completes or aborts
+	defer func() {
+		_ = w.ollamaClient.UnloadModel(context.Background())
+		log.Println("[Worker] Unloaded Ollama model from GPU VRAM. GPU returned to idle.")
+	}()
+
+	targetPerCategory := w.cfg.BatchSize // 50 questions target per category
 	totalGenerated := 0
 	totalSaved := 0
 
 	difficulties := []string{"junior", "junior", "middle"} // 2/3 Junior, 1/3 Middle
 
 	for _, cat := range categories {
-		log.Printf("[Worker] Generating %d questions for category '%s'...", targetPerCategory, cat.Name)
+		// Calculate how many questions are actually needed to reach 50
+		needed := targetPerCategory - cat.AvailableQuestions
+		if needed <= 0 {
+			continue
+		}
+		if needed > targetPerCategory {
+			needed = targetPerCategory
+		}
+
+		log.Printf("[Worker] Generating %d questions to refill category '%s' (current available: %d, target: %d)...",
+			needed, cat.Name, cat.AvailableQuestions, targetPerCategory)
 		catSaved := 0
 
-		for i := 0; i < targetPerCategory; i++ {
+		for i := 0; i < needed; i++ {
 			select {
 			case <-ctx.Done():
 				w.updateStatus(true, false, "Generation canceled (shutdown)")
@@ -210,7 +219,7 @@ func (w *Worker) generateCategoryBatches(ctx context.Context, categories []model
 				catSaved++
 				totalSaved++
 				log.Printf("[Worker] [%s %d/%d] Saved question (%s, answers=%d)",
-					cat.Name, catSaved, targetPerCategory, dto.Difficulty, len(dto.CorrectIndices))
+					cat.Name, catSaved, needed, dto.Difficulty, len(dto.CorrectIndices))
 			} else {
 				log.Printf("[Worker] Duplicate question skipped for '%s'", cat.Name)
 			}

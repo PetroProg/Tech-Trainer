@@ -50,6 +50,29 @@ func (c *Client) Ping(ctx context.Context) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
+// UnloadModel frees GPU VRAM immediately by evicting the model from memory.
+func (c *Client) UnloadModel(ctx context.Context) error {
+	payload := map[string]interface{}{
+		"model":      c.modelName,
+		"keep_alive": 0,
+	}
+	data, _ := json.Marshal(payload)
+	reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, "POST", c.baseURL+"/api/generate", bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return nil
+}
+
 type generateRequest struct {
 	Model  string `json:"model"`
 	Prompt string `json:"prompt"`
