@@ -34,9 +34,11 @@ func Open(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("failed to open sqlite: %w", err)
 	}
 
-	// Single connection pool ensures minimal RAM overhead and prevents SQLite locking issues
-	conn.SetMaxOpenConns(1)
-	conn.SetMaxIdleConns(1)
+	// Connection pool settings: WAL mode allows concurrent readers.
+	// Allow multiple connections so concurrent readers and sequential queries never starve.
+	conn.SetMaxOpenConns(10)
+	conn.SetMaxIdleConns(5)
+	conn.SetConnMaxLifetime(time.Hour)
 
 	pragmas := []string{
 		"PRAGMA journal_mode=WAL;",
@@ -216,7 +218,7 @@ func (d *DB) GetCategories() ([]models.Category, error) {
 	}
 	defer rows.Close()
 
-	var categories []models.Category
+	categories := make([]models.Category, 0)
 	for rows.Next() {
 		var c models.Category
 		var activeInt int
@@ -347,6 +349,7 @@ func (d *DB) GetRandomQuestion(categorySlug, difficulty string) (*models.Questio
 	}
 
 	q.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+	q.Options = make([]models.Option, 0)
 
 	// Fetch option choices
 	optRows, err := d.conn.Query(`
@@ -358,7 +361,6 @@ func (d *DB) GetRandomQuestion(categorySlug, difficulty string) (*models.Questio
 	if err != nil {
 		return nil, err
 	}
-	defer optRows.Close()
 
 	for optRows.Next() {
 		var o models.Option
@@ -368,6 +370,7 @@ func (d *DB) GetRandomQuestion(categorySlug, difficulty string) (*models.Questio
 			q.Options = append(q.Options, o)
 		}
 	}
+	optRows.Close()
 
 	return &q, nil
 }
@@ -466,7 +469,6 @@ func (d *DB) SubmitAnswer(questionID int64, selectedIDs []int64) (*models.Submit
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
 	var correctIDs []int64
 	correctMap := make(map[int64]bool)
@@ -477,6 +479,7 @@ func (d *DB) SubmitAnswer(questionID int64, selectedIDs []int64) (*models.Submit
 			correctMap[id] = true
 		}
 	}
+	rows.Close() // Explicitly close rows immediately!
 
 	isAllCorrect := len(selectedIDs) == len(correctIDs)
 	if isAllCorrect {
@@ -505,7 +508,6 @@ func (d *DB) SubmitAnswer(questionID int64, selectedIDs []int64) (*models.Submit
 	var streak int
 	streakRows, err := d.conn.Query(`SELECT is_correct FROM user_answers ORDER BY answered_at DESC, id DESC LIMIT 50`)
 	if err == nil {
-		defer streakRows.Close()
 		for streakRows.Next() {
 			var corr int
 			if err := streakRows.Scan(&corr); err == nil {
@@ -516,6 +518,7 @@ func (d *DB) SubmitAnswer(questionID int64, selectedIDs []int64) (*models.Submit
 				}
 			}
 		}
+		streakRows.Close() // Explicitly close immediately!
 	}
 
 	var totalScore int
@@ -563,7 +566,6 @@ func (d *DB) GetUserStats() (*models.UserStats, error) {
 
 	streakRows, err := d.conn.Query(`SELECT is_correct FROM user_answers ORDER BY answered_at DESC, id DESC LIMIT 50`)
 	if err == nil {
-		defer streakRows.Close()
 		for streakRows.Next() {
 			var corr int
 			if err := streakRows.Scan(&corr); err == nil {
@@ -574,6 +576,7 @@ func (d *DB) GetUserStats() (*models.UserStats, error) {
 				}
 			}
 		}
+		streakRows.Close() // Explicitly close immediately!
 	}
 
 	// Persistent category metrics based on user_answers even after questions expire
@@ -587,7 +590,6 @@ func (d *DB) GetUserStats() (*models.UserStats, error) {
 		GROUP BY c.id
 	`)
 	if err == nil {
-		defer catRows.Close()
 		for catRows.Next() {
 			var cs models.CategoryStat
 			var corr sql.NullInt64
@@ -599,6 +601,7 @@ func (d *DB) GetUserStats() (*models.UserStats, error) {
 				stats.ByCategory = append(stats.ByCategory, cs)
 			}
 		}
+		catRows.Close() // Explicitly close immediately!
 	}
 
 	return stats, nil
