@@ -49,6 +49,32 @@ func (a *API) GetCategories(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, categories)
 }
 
+// GetOfflinePack downloads active categories and questions for offline usage.
+func (a *API) GetOfflinePack(w http.ResponseWriter, r *http.Request) {
+	pack, err := a.database.GetOfflinePack()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, pack)
+}
+
+// SyncAnswers processes a batch of offline answers.
+func (a *API) SyncAnswers(w http.ResponseWriter, r *http.Request) {
+	var req models.SyncAnswersRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid JSON payload")
+		return
+	}
+
+	resp, err := a.database.SyncAnswers(req.Answers)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // CreateCategoryRequest defines the payload for creating a custom category.
 type CreateCategoryRequest struct {
 	Name                string `json:"name"`

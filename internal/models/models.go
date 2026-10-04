@@ -43,6 +43,51 @@ type Question struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+// OfflineQuestion includes preloaded validation data for autonomous offline execution.
+type OfflineQuestion struct {
+	ID               int64     `json:"id"`
+	CategoryID       int64     `json:"category_id"`
+	CategorySlug     string    `json:"category_slug"`
+	CategoryName     string    `json:"category_name"`
+	Type             string    `json:"type"`
+	Difficulty       string    `json:"difficulty"`
+	QuestionText     string    `json:"question_text"`
+	CodeSnippet      string    `json:"code_snippet"`
+	Language         string    `json:"language"`
+	Explanation      string    `json:"explanation"`
+	Options          []Option  `json:"options"`
+	CorrectOptionIDs []int64   `json:"correct_option_ids"`
+	IsSolved         bool      `json:"is_solved"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+// OfflinePack represents all categories and questions downloaded for disconnected play.
+type OfflinePack struct {
+	Categories []Category        `json:"categories"`
+	Questions  []OfflineQuestion `json:"questions"`
+	SyncedAt   time.Time         `json:"synced_at"`
+}
+
+// SyncAnswerItem defines one answer recorded while offline.
+type SyncAnswerItem struct {
+	QuestionID        int64     `json:"question_id"`
+	SelectedOptionIDs []int64   `json:"selected_option_ids"`
+	AnsweredAt        time.Time `json:"answered_at"`
+}
+
+// SyncAnswersRequest represents a batch of answers submitted upon reconnecting online.
+type SyncAnswersRequest struct {
+	Answers []SyncAnswerItem `json:"answers"`
+}
+
+// SyncAnswersResponse returns updated stats and verification outcome.
+type SyncAnswersResponse struct {
+	SyncedCount int        `json:"synced_count"`
+	TotalScore  int        `json:"total_score"`
+	Streak      int        `json:"streak"`
+	UserStats   *UserStats `json:"user_stats"`
+}
+
 // SubmitAnswerRequest represents the user's selected option IDs.
 type SubmitAnswerRequest struct {
 	SelectedOptionIDs []int64 `json:"selected_option_ids"`

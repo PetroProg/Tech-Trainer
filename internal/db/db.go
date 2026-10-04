@@ -193,11 +193,8 @@ func (d *DB) PruneExpiredQuestions() (int64, error) {
 	return res.RowsAffected()
 }
 
-// GetCategories returns all active categories along with counts of total, solved, and available questions.
-func (d *DB) GetCategories() ([]models.Category, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
+// getCategoriesLocked queries categories assuming d.mu is already held.
+func (d *DB) getCategoriesLocked() ([]models.Category, error) {
 	query := `
 	SELECT 
 		c.id, c.slug, c.name, c.description, c.prompt_instructions, c.is_active, c.created_at,
@@ -237,6 +234,13 @@ func (d *DB) GetCategories() ([]models.Category, error) {
 	}
 
 	return categories, nil
+}
+
+// GetCategories returns all active categories along with counts of total, solved, and available questions.
+func (d *DB) GetCategories() ([]models.Category, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.getCategoriesLocked()
 }
 
 // CreateCategory inserts a new category and returns its ID.
@@ -531,6 +535,198 @@ func (d *DB) SubmitAnswer(questionID int64, selectedIDs []int64) (*models.Submit
 		SelectedOptionIDs: selectedIDs,
 		Streak:            streak,
 		TotalScore:        totalScore,
+	}, nil
+}
+
+// SyncAnswers records multiple answers solved while disconnected.
+func (d *DB) SyncAnswers(items []models.SyncAnswerItem) (*models.SyncAnswersResponse, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	synced := 0
+	for _, item := range items {
+		var categoryID int64
+		err := d.conn.QueryRow("SELECT category_id FROM questions WHERE id = ?", item.QuestionID).Scan(&categoryID)
+		if err != nil {
+			continue // question deleted or missing
+		}
+
+		rows, err := d.conn.Query("SELECT id FROM options WHERE question_id = ? AND is_correct = 1", item.QuestionID)
+		if err != nil {
+			continue
+		}
+		var correctIDs []int64
+		correctMap := make(map[int64]bool)
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err == nil {
+				correctIDs = append(correctIDs, id)
+				correctMap[id] = true
+			}
+		}
+		rows.Close()
+
+		isAllCorrect := len(item.SelectedOptionIDs) == len(correctIDs)
+		if isAllCorrect {
+			for _, selID := range item.SelectedOptionIDs {
+				if !correctMap[selID] {
+					isAllCorrect = false
+					break
+				}
+			}
+		}
+
+		selectedJSON, _ := json.Marshal(item.SelectedOptionIDs)
+		isCorrectInt := 0
+		if isAllCorrect {
+			isCorrectInt = 1
+		}
+
+		answeredTime := item.AnsweredAt
+		if answeredTime.IsZero() {
+			answeredTime = time.Now()
+		}
+		timeStr := answeredTime.Format("2006-01-02 15:04:05")
+
+		_, err = d.conn.Exec(`
+			INSERT INTO user_answers (question_id, category_id, selected_option_ids, is_correct, answered_at)
+			VALUES (?, ?, ?, ?, ?)
+		`, item.QuestionID, categoryID, string(selectedJSON), isCorrectInt, timeStr)
+		if err == nil {
+			synced++
+		}
+	}
+
+	var streak int
+	streakRows, err := d.conn.Query(`SELECT is_correct FROM user_answers ORDER BY answered_at DESC, id DESC LIMIT 50`)
+	if err == nil {
+		for streakRows.Next() {
+			var corr int
+			if err := streakRows.Scan(&corr); err == nil {
+				if corr == 1 {
+					streak++
+				} else {
+					break
+				}
+			}
+		}
+		streakRows.Close()
+	}
+
+	var totalScore int
+	_ = d.conn.QueryRow(`SELECT COALESCE(SUM(CASE WHEN is_correct = 1 THEN 10 ELSE 0 END), 0) FROM user_answers`).Scan(&totalScore)
+
+	stats := &models.UserStats{
+		CurrentStreak: streak,
+		TotalScore:    totalScore,
+		ByCategory:    make([]models.CategoryStat, 0),
+	}
+	_ = d.conn.QueryRow(`
+		SELECT 
+			COUNT(*),
+			COALESCE(SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END), 0)
+		FROM user_answers
+	`).Scan(&stats.TotalAnswered, &stats.TotalCorrect)
+	if stats.TotalAnswered > 0 {
+		stats.AccuracyPercent = float64(stats.TotalCorrect) / float64(stats.TotalAnswered) * 100.0
+	}
+
+	return &models.SyncAnswersResponse{
+		SyncedCount: synced,
+		TotalScore:  totalScore,
+		Streak:      streak,
+		UserStats:   stats,
+	}, nil
+}
+
+// GetOfflinePack packages all active categories and their challenges for offline client storage.
+func (d *DB) GetOfflinePack() (*models.OfflinePack, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	categories, err := d.getCategoriesLocked()
+	if err != nil {
+		return nil, err
+	}
+
+	answeredMap := make(map[int64]bool)
+	ansRows, err := d.conn.Query("SELECT DISTINCT question_id FROM user_answers WHERE question_id IS NOT NULL")
+	if err == nil {
+		for ansRows.Next() {
+			var qID int64
+			if err := ansRows.Scan(&qID); err == nil {
+				answeredMap[qID] = true
+			}
+		}
+		ansRows.Close()
+	}
+
+	qQuery := `
+		SELECT q.id, q.category_id, c.slug, c.name, q.type, q.difficulty,
+		       q.question_text, q.code_snippet, q.language, q.explanation, q.created_at
+		FROM questions q
+		JOIN categories c ON q.category_id = c.id
+		WHERE c.is_active = 1
+		ORDER BY q.id ASC
+	`
+	qRows, err := d.conn.Query(qQuery)
+	if err != nil {
+		return nil, err
+	}
+
+	questions := make([]models.OfflineQuestion, 0)
+	qMap := make(map[int64]*models.OfflineQuestion)
+
+	for qRows.Next() {
+		var oq models.OfflineQuestion
+		var createdAt string
+		err := qRows.Scan(
+			&oq.ID, &oq.CategoryID, &oq.CategorySlug, &oq.CategoryName,
+			&oq.Type, &oq.Difficulty, &oq.QuestionText, &oq.CodeSnippet,
+			&oq.Language, &oq.Explanation, &createdAt,
+		)
+		if err != nil {
+			qRows.Close()
+			return nil, err
+		}
+		oq.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+		oq.Options = make([]models.Option, 0)
+		oq.CorrectOptionIDs = make([]int64, 0)
+		oq.IsSolved = answeredMap[oq.ID]
+		questions = append(questions, oq)
+	}
+	qRows.Close()
+
+	for i := range questions {
+		qMap[questions[i].ID] = &questions[i]
+	}
+
+	optRows, err := d.conn.Query(`
+		SELECT id, question_id, option_text, is_correct, order_idx
+		FROM options
+		ORDER BY question_id ASC, order_idx ASC
+	`)
+	if err == nil {
+		for optRows.Next() {
+			var o models.Option
+			var isCorrectInt int
+			if err := optRows.Scan(&o.ID, &o.QuestionID, &o.OptionText, &isCorrectInt, &o.OrderIndex); err == nil {
+				o.IsCorrect = isCorrectInt == 1
+				if q, ok := qMap[o.QuestionID]; ok {
+					q.Options = append(q.Options, o)
+					if o.IsCorrect {
+						q.CorrectOptionIDs = append(q.CorrectOptionIDs, o.ID)
+					}
+				}
+			}
+		}
+		optRows.Close()
+	}
+
+	return &models.OfflinePack{
+		Categories: categories,
+		Questions:  questions,
+		SyncedAt:   time.Now(),
 	}, nil
 }
 

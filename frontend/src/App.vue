@@ -10,12 +10,15 @@ import {
   getUserStats,
   getWorkerStatus,
   triggerWorker,
+  downloadAndCacheOfflinePack,
+  syncOfflineAnswersToServer,
   type Category,
   type Question,
   type SubmitAnswerResponse,
   type UserStats,
   type WorkerStatus
 } from './api'
+import { getPendingAnswersCount } from './offline'
 
 // Application State
 const categories = ref<Category[]>([])
@@ -27,6 +30,12 @@ const answerResult = ref<SubmitAnswerResponse | null>(null)
 const loading = ref(false)
 const submitting = ref(false)
 const errorMessage = ref('')
+
+// Offline & Synchronization State
+const isOnline = ref(navigator.onLine)
+const pendingCount = ref(0)
+const isSyncing = ref(false)
+const lastSyncMessage = ref('')
 
 // Analytics & Worker Monitor
 const stats = ref<UserStats | null>(null)
@@ -44,11 +53,63 @@ const creatingCategory = ref(false)
 
 // Lifecycle
 onMounted(async () => {
+  window.addEventListener('online', async () => {
+    isOnline.value = true
+    await handleSync()
+  })
+  window.addEventListener('offline', () => {
+    isOnline.value = false
+  })
+
+  await refreshPendingCount()
   await Promise.all([loadCategories(), loadStats(), loadWorkerStatus()])
   await nextQuestion()
-  // Poll worker status every 15 seconds
-  setInterval(loadWorkerStatus, 15000)
+
+  if (pendingCount.value > 0) {
+    await handleSync()
+  }
+
+  // Pre-load offline pack in the background so offline mode is always primed
+  downloadAndCacheOfflinePack().catch(() => {})
+
+  // Poll worker status if online
+  setInterval(() => {
+    if (isOnline.value) loadWorkerStatus()
+  }, 20000)
 })
+
+async function refreshPendingCount() {
+  try {
+    pendingCount.value = await getPendingAnswersCount()
+  } catch {
+    pendingCount.value = 0
+  }
+}
+
+async function handleSync() {
+  if (isSyncing.value) return
+  isSyncing.value = true
+  lastSyncMessage.value = 'Syncing...'
+  try {
+    const res = await syncOfflineAnswersToServer()
+    if (res && res.synced_count > 0) {
+      lastSyncMessage.value = `Synced ${res.synced_count} answer${res.synced_count > 1 ? 's' : ''}!`
+      if (res.user_stats) {
+        stats.value = res.user_stats
+      }
+      await loadCategories()
+      setTimeout(() => { lastSyncMessage.value = '' }, 4000)
+    } else {
+      lastSyncMessage.value = ''
+    }
+    await refreshPendingCount()
+  } catch (e: any) {
+    lastSyncMessage.value = 'Sync failed (server unreachable)'
+    setTimeout(() => { lastSyncMessage.value = '' }, 3000)
+  } finally {
+    isSyncing.value = false
+  }
+}
 
 async function loadCategories() {
   try {
@@ -114,6 +175,7 @@ async function handleAnswer() {
       if (res.is_correct) stats.value.total_correct++
       stats.value.accuracy_percent = Math.round((stats.value.total_correct / stats.value.total_answered) * 100)
     }
+    await refreshPendingCount()
   } catch (e: any) {
     alert('Failed to submit answer: ' + e.message)
   } finally {
@@ -188,7 +250,7 @@ function getOptionClass(optionId: number) {
       <div class="flex items-center justify-between pb-3 border-b border-slate-800">
         <div class="flex items-center gap-2">
           <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-500 flex items-center justify-center shadow-lg shadow-sky-500/20">
-            <span class="text-xl">⚡</span>
+            <span class="text-xl">?</span>
           </div>
           <div>
             <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
@@ -203,13 +265,13 @@ function getOptionClass(optionId: number) {
         <div class="flex items-center gap-2">
           <!-- Streak Badge -->
           <div class="flex items-center gap-1 bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-amber-400">
-            <span>🔥</span>
+            <span>??</span>
             <span>{{ stats?.current_streak || 0 }}</span>
           </div>
 
           <!-- Total Score -->
           <div class="flex items-center gap-1 bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-sky-400">
-            <span>⭐</span>
+            <span>?</span>
             <span>{{ stats?.total_score || 0 }}</span>
           </div>
 
@@ -219,32 +281,48 @@ function getOptionClass(optionId: number) {
             class="p-2 bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 rounded-xl text-xs transition"
             title="Statistics"
           >
-            📊
+            ??
           </button>
         </div>
       </div>
 
-      <!-- Worker Heartbeat Status Banner -->
-      <div class="mt-2.5 flex items-center justify-between text-xs px-3 py-1.5 rounded-lg bg-slate-900/60 border border-slate-800/80">
+      <!-- Network / Tailscale & Offline Sync Status Banner -->
+      <div 
+        class="mt-2.5 flex items-center justify-between text-xs px-3 py-1.5 rounded-lg border transition-colors"
+        :class="pendingCount > 0 ? 'bg-amber-950/40 border-amber-800/60' : 'bg-slate-900/60 border-slate-800/80'"
+      >
         <div class="flex items-center gap-2">
           <span 
-            class="w-2 h-2 rounded-full inline-block animate-pulse"
-            :class="workerStatus?.is_running ? 'bg-amber-400' : (workerStatus?.is_online ? 'bg-emerald-400' : 'bg-rose-500')"
+            class="w-2 h-2 rounded-full inline-block"
+            :class="pendingCount > 0 ? 'bg-amber-400 animate-pulse' : (isOnline ? 'bg-emerald-400' : 'bg-slate-500')"
           ></span>
-          <span class="text-slate-400 text-[11px]">
-            Ollama RTX 3060:
-            <b class="text-slate-200">
-              {{ workerStatus?.is_running ? 'Generating batch...' : (workerStatus?.is_online ? 'Online' : 'Offline (sleeping)') }}
-            </b>
+          <span class="text-[11px] text-slate-300">
+            <span v-if="pendingCount > 0" class="text-amber-300 font-semibold">
+              Offline queue: {{ pendingCount }} answer{{ pendingCount > 1 ? 's' : '' }} pending sync
+            </span>
+            <span v-else-if="isOnline" class="text-slate-400">
+              Online ? Ready
+            </span>
+            <span v-else class="text-slate-400">
+              Disconnected from Tailscale ? Full Offline Mode Active
+            </span>
           </span>
         </div>
-        <button 
-          v-if="workerStatus?.is_online && !workerStatus?.is_running"
-          @click="handleTriggerGeneration"
-          class="text-[11px] text-sky-400 hover:text-sky-300 font-medium flex items-center gap-1"
-        >
-          <span>↻ Generate Batch</span>
-        </button>
+
+        <div class="flex items-center gap-2">
+          <span v-if="lastSyncMessage" class="text-[10px] text-emerald-400 font-medium">
+            {{ lastSyncMessage }}
+          </span>
+          <button 
+            v-if="pendingCount > 0"
+            @click="handleSync"
+            :disabled="isSyncing"
+            class="text-[11px] px-2 py-0.5 rounded bg-sky-500 hover:bg-sky-400 text-white font-medium flex items-center gap-1 cursor-pointer transition disabled:opacity-50"
+          >
+            <span :class="{ 'animate-spin': isSyncing }">?</span>
+            <span>{{ isSyncing ? 'Syncing...' : 'Sync Now' }}</span>
+          </button>
+        </div>
       </div>
 
       <!-- Category Filter Pills -->
@@ -292,7 +370,7 @@ function getOptionClass(optionId: number) {
 
       <!-- Empty State -->
       <div v-else-if="errorMessage || !currentQuestion" class="p-6 text-center bg-slate-900/80 border border-slate-800 rounded-2xl">
-        <div class="text-4xl mb-2">📦</div>
+        <div class="text-4xl mb-2">??</div>
         <h3 class="text-base font-semibold text-slate-200">No Questions Available</h3>
         <p class="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
           {{ errorMessage || 'There are currently no unanswered questions in this category.' }}
@@ -327,10 +405,13 @@ function getOptionClass(optionId: number) {
             >
               {{ currentQuestion.difficulty }}
             </span>
+            <span v-if="currentQuestion.is_solved" class="px-2 py-0.5 rounded-full text-slate-400 bg-slate-800 border border-slate-700 text-[10px]">
+              Review Mode
+            </span>
           </div>
 
           <span class="text-slate-400 font-medium">
-            1–4 Correct Answers
+            1?4 Correct Answers
           </span>
         </div>
 
@@ -388,24 +469,29 @@ function getOptionClass(optionId: number) {
           <!-- Results & Explanation Container -->
           <div v-else class="space-y-4 animate-fade-in">
             <div 
-              class="p-4 rounded-xl border flex items-center gap-3"
+              class="p-4 rounded-xl border flex items-center justify-between"
               :class="answerResult.is_correct ? 'bg-emerald-950/40 border-emerald-500/60 text-emerald-200' : 'bg-rose-950/40 border-rose-500/60 text-rose-200'"
             >
-              <span class="text-2xl">{{ answerResult.is_correct ? '🎉' : '❌' }}</span>
-              <div>
-                <h4 class="font-bold text-sm">
-                  {{ answerResult.is_correct ? 'Spot on! Perfect answer.' : 'Incorrect selection.' }}
-                </h4>
-                <p class="text-xs opacity-90">
-                  {{ answerResult.is_correct ? '+10 score points awarded' : 'Review the breakdown below and keep moving forward' }}
-                </p>
+              <div class="flex items-center gap-3">
+                <span class="text-2xl">{{ answerResult.is_correct ? '??' : '?' }}</span>
+                <div>
+                  <h4 class="font-bold text-sm">
+                    {{ answerResult.is_correct ? 'Spot on! Perfect answer.' : 'Incorrect selection.' }}
+                  </h4>
+                  <p class="text-xs opacity-90">
+                    {{ answerResult.is_correct ? '+10 score points awarded' : 'Review the breakdown below and keep moving forward' }}
+                  </p>
+                </div>
               </div>
+              <span v-if="answerResult.is_offline" class="text-[10px] bg-amber-900/60 text-amber-200 px-2 py-0.5 rounded-full font-medium border border-amber-700/50">
+                Queued Offline
+              </span>
             </div>
 
             <!-- Deep AI Explanation -->
             <div class="p-4 bg-slate-950 border border-slate-800 rounded-xl text-xs leading-relaxed text-slate-300">
               <div class="flex items-center gap-1.5 text-sky-400 font-semibold mb-2">
-                <span>💡</span>
+                <span>??</span>
                 <span>AI Solution Breakdown:</span>
               </div>
               <div class="whitespace-pre-wrap font-sans text-slate-200">
@@ -420,7 +506,7 @@ function getOptionClass(optionId: number) {
                 class="flex-1 py-3 px-4 bg-sky-500 hover:bg-sky-400 text-white font-semibold text-sm rounded-xl transition shadow-lg shadow-sky-500/20 active:scale-[0.99] flex items-center justify-center gap-2"
               >
                 <span>Next Question</span>
-                <span>→</span>
+                <span>?</span>
               </button>
 
               <button
@@ -428,7 +514,7 @@ function getOptionClass(optionId: number) {
                 class="p-3 bg-slate-800/80 hover:bg-rose-900/40 hover:border-rose-700/60 border border-slate-700 text-slate-400 hover:text-rose-300 rounded-xl transition"
                 title="Report and delete question from database"
               >
-                🗑️
+                ???
               </button>
             </div>
           </div>
@@ -438,14 +524,14 @@ function getOptionClass(optionId: number) {
 
     <!-- Footer -->
     <footer class="mt-6 text-center text-[11px] text-slate-500">
-      Self-hosted on <code class="text-slate-400">petroprog</code> • Tailscale Mesh • Powered by Qwen 2.5
+      Self-hosted on <code class="text-slate-400">petroprog</code> ? Tailscale Mesh ? Powered by Qwen 2.5
     </footer>
 
     <!-- New Category Modal -->
     <div v-if="showCategoryModal" class="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
       <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md w-full shadow-2xl">
         <h3 class="text-base font-bold text-slate-100 flex items-center gap-2">
-          <span>📂</span>
+          <span>??</span>
           <span>New Question Category</span>
         </h3>
         <p class="text-xs text-slate-400 mt-1">
@@ -509,10 +595,10 @@ function getOptionClass(optionId: number) {
       <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md w-full shadow-2xl">
         <div class="flex items-center justify-between pb-3 border-b border-slate-800">
           <h3 class="text-base font-bold text-slate-100 flex items-center gap-2">
-            <span>📊</span>
+            <span>??</span>
             <span>Your Performance</span>
           </h3>
-          <button @click="showStatsModal = false" class="text-slate-400 hover:text-white text-lg">✕</button>
+          <button @click="showStatsModal = false" class="text-slate-400 hover:text-white text-lg">?</button>
         </div>
 
         <div class="mt-4 grid grid-cols-3 gap-2 text-center">
