@@ -69,10 +69,10 @@ onMounted(async () => {
     await handleSync()
   }
 
-  // Pre-load offline pack in the background so offline mode is always primed
+  // Pre-load offline pack in background
   downloadAndCacheOfflinePack().catch(() => {})
 
-  // Poll worker status if online
+  // Periodic worker status check
   setInterval(() => {
     if (isOnline.value) loadWorkerStatus()
   }, 20000)
@@ -104,7 +104,7 @@ async function handleSync() {
     }
     await refreshPendingCount()
   } catch (e: any) {
-    lastSyncMessage.value = 'Sync failed (server unreachable)'
+    lastSyncMessage.value = 'Sync failed (offline)'
     setTimeout(() => { lastSyncMessage.value = '' }, 3000)
   } finally {
     isSyncing.value = false
@@ -152,7 +152,7 @@ async function nextQuestion() {
 }
 
 function toggleOption(id: number) {
-  if (answerResult.value) return // Prevent clicking after submission
+  if (answerResult.value) return
   const idx = selectedOptionIds.value.indexOf(id)
   if (idx > -1) {
     selectedOptionIds.value.splice(idx, 1)
@@ -249,8 +249,10 @@ function getOptionClass(optionId: number) {
     <header class="mb-4">
       <div class="flex items-center justify-between pb-3 border-b border-slate-800">
         <div class="flex items-center gap-2">
-          <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-500 flex items-center justify-center shadow-lg shadow-sky-500/20">
-            <span class="text-xl">?</span>
+          <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-500 flex items-center justify-center shadow-lg shadow-sky-500/20 shrink-0">
+            <svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd"/>
+            </svg>
           </div>
           <div>
             <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
@@ -264,14 +266,18 @@ function getOptionClass(optionId: number) {
         <!-- Top Status Indicators -->
         <div class="flex items-center gap-2">
           <!-- Streak Badge -->
-          <div class="flex items-center gap-1 bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-amber-400">
-            <span>??</span>
+          <div class="flex items-center gap-1.5 bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-amber-400" title="Streak">
+            <svg class="w-3.5 h-3.5 text-amber-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M12.395 2.553a1 1 0 00-1.45-.385c-.345.23-.614.558-.822.88-.527.82-1.176 1.906-1.513 3.013a7.002 7.002 0 00-1.815 1.583C6.117 8.52 5 10.384 5 12.5 5 16.09 7.91 19 11.5 19s6.5-2.91 6.5-6.5c0-2.316-.948-4.22-2.368-5.748a12.87 12.87 0 00-2.737-2.199 1 1 0 00-.5-.1zM11.5 17c-2.485 0-4.5-2.015-4.5-4.5 0-1.52.793-2.937 1.62-3.834.33-.358.706-.693 1.096-.983.332 1.042.87 1.954 1.544 2.686A4.478 4.478 0 0011 12.5c0 1.243.504 2.37 1.318 3.182A4.475 4.475 0 0011.5 17z" clip-rule="evenodd"/>
+            </svg>
             <span>{{ stats?.current_streak || 0 }}</span>
           </div>
 
           <!-- Total Score -->
-          <div class="flex items-center gap-1 bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-sky-400">
-            <span>?</span>
+          <div class="flex items-center gap-1.5 bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-sky-400" title="Score">
+            <svg class="w-3.5 h-3.5 text-sky-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
+            </svg>
             <span>{{ stats?.total_score || 0 }}</span>
           </div>
 
@@ -281,7 +287,9 @@ function getOptionClass(optionId: number) {
             class="p-2 bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 rounded-xl text-xs transition"
             title="Statistics"
           >
-            ??
+            <svg class="w-3.5 h-3.5 text-slate-300" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/>
+            </svg>
           </button>
         </div>
       </div>
@@ -300,11 +308,13 @@ function getOptionClass(optionId: number) {
             <span v-if="pendingCount > 0" class="text-amber-300 font-semibold">
               Offline queue: {{ pendingCount }} answer{{ pendingCount > 1 ? 's' : '' }} pending sync
             </span>
-            <span v-else-if="isOnline" class="text-slate-400">
-              Online ? Ready
+            <span v-else-if="isOnline" class="text-slate-400 flex items-center gap-1.5">
+              <span>Online</span>
+              <span class="w-1 h-1 rounded-full bg-slate-600"></span>
+              <span>Ready</span>
             </span>
             <span v-else class="text-slate-400">
-              Disconnected from Tailscale ? Full Offline Mode Active
+              Tailscale Offline - Local Mode Active
             </span>
           </span>
         </div>
@@ -319,7 +329,7 @@ function getOptionClass(optionId: number) {
             :disabled="isSyncing"
             class="text-[11px] px-2 py-0.5 rounded bg-sky-500 hover:bg-sky-400 text-white font-medium flex items-center gap-1 cursor-pointer transition disabled:opacity-50"
           >
-            <span :class="{ 'animate-spin': isSyncing }">?</span>
+            <svg :class="{ 'animate-spin': isSyncing }" class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
             <span>{{ isSyncing ? 'Syncing...' : 'Sync Now' }}</span>
           </button>
         </div>
@@ -370,7 +380,9 @@ function getOptionClass(optionId: number) {
 
       <!-- Empty State -->
       <div v-else-if="errorMessage || !currentQuestion" class="p-6 text-center bg-slate-900/80 border border-slate-800 rounded-2xl">
-        <div class="text-4xl mb-2">??</div>
+        <svg class="w-10 h-10 text-slate-500 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+        </svg>
         <h3 class="text-base font-semibold text-slate-200">No Questions Available</h3>
         <p class="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
           {{ errorMessage || 'There are currently no unanswered questions in this category.' }}
@@ -411,7 +423,7 @@ function getOptionClass(optionId: number) {
           </div>
 
           <span class="text-slate-400 font-medium">
-            1?4 Correct Answers
+            1 - 4 Correct Answers
           </span>
         </div>
 
@@ -473,7 +485,12 @@ function getOptionClass(optionId: number) {
               :class="answerResult.is_correct ? 'bg-emerald-950/40 border-emerald-500/60 text-emerald-200' : 'bg-rose-950/40 border-rose-500/60 text-rose-200'"
             >
               <div class="flex items-center gap-3">
-                <span class="text-2xl">{{ answerResult.is_correct ? '??' : '?' }}</span>
+                <svg v-if="answerResult.is_correct" class="w-6 h-6 text-emerald-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                </svg>
+                <svg v-else class="w-6 h-6 text-rose-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+                </svg>
                 <div>
                   <h4 class="font-bold text-sm">
                     {{ answerResult.is_correct ? 'Spot on! Perfect answer.' : 'Incorrect selection.' }}
@@ -491,7 +508,9 @@ function getOptionClass(optionId: number) {
             <!-- Deep AI Explanation -->
             <div class="p-4 bg-slate-950 border border-slate-800 rounded-xl text-xs leading-relaxed text-slate-300">
               <div class="flex items-center gap-1.5 text-sky-400 font-semibold mb-2">
-                <span>??</span>
+                <svg class="w-4 h-4 text-sky-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14H8a4 4 0 01-.82-7.915 4.962 4.962 0 011.64-1.085 5 5 0 016.36 6.36A4.962 4.962 0 0112 14z"/>
+                </svg>
                 <span>AI Solution Breakdown:</span>
               </div>
               <div class="whitespace-pre-wrap font-sans text-slate-200">
@@ -506,7 +525,7 @@ function getOptionClass(optionId: number) {
                 class="flex-1 py-3 px-4 bg-sky-500 hover:bg-sky-400 text-white font-semibold text-sm rounded-xl transition shadow-lg shadow-sky-500/20 active:scale-[0.99] flex items-center justify-center gap-2"
               >
                 <span>Next Question</span>
-                <span>?</span>
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
               </button>
 
               <button
@@ -514,7 +533,9 @@ function getOptionClass(optionId: number) {
                 class="p-3 bg-slate-800/80 hover:bg-rose-900/40 hover:border-rose-700/60 border border-slate-700 text-slate-400 hover:text-rose-300 rounded-xl transition"
                 title="Report and delete question from database"
               >
-                ???
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/>
+                </svg>
               </button>
             </div>
           </div>
@@ -524,14 +545,16 @@ function getOptionClass(optionId: number) {
 
     <!-- Footer -->
     <footer class="mt-6 text-center text-[11px] text-slate-500">
-      Self-hosted on <code class="text-slate-400">petroprog</code> ? Tailscale Mesh ? Powered by Qwen 2.5
+      Self-hosted on <code class="text-slate-400">petroprog</code> <span class="mx-1.5 opacity-40">&bull;</span> Tailscale Mesh <span class="mx-1.5 opacity-40">&bull;</span> Powered by Qwen 2.5
     </footer>
 
     <!-- New Category Modal -->
     <div v-if="showCategoryModal" class="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
       <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md w-full shadow-2xl">
         <h3 class="text-base font-bold text-slate-100 flex items-center gap-2">
-          <span>??</span>
+          <svg class="w-4 h-4 text-sky-400" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
+          </svg>
           <span>New Question Category</span>
         </h3>
         <p class="text-xs text-slate-400 mt-1">
@@ -595,10 +618,12 @@ function getOptionClass(optionId: number) {
       <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md w-full shadow-2xl">
         <div class="flex items-center justify-between pb-3 border-b border-slate-800">
           <h3 class="text-base font-bold text-slate-100 flex items-center gap-2">
-            <span>??</span>
+            <svg class="w-4 h-4 text-sky-400" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/>
+            </svg>
             <span>Your Performance</span>
           </h3>
-          <button @click="showStatsModal = false" class="text-slate-400 hover:text-white text-lg">?</button>
+          <button @click="showStatsModal = false" class="text-slate-400 hover:text-white"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
         </div>
 
         <div class="mt-4 grid grid-cols-3 gap-2 text-center">

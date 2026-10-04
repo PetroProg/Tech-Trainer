@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import Prism from 'prismjs'
 import 'prismjs/components/prism-python'
 import 'prismjs/components/prism-go'
@@ -19,6 +19,23 @@ const props = defineProps<{
 const codeEl = ref<HTMLElement | null>(null)
 const copied = ref(false)
 
+// Strip leading ```lang and trailing ``` if model wrapped snippet in markdown fences
+const cleanCode = computed(() => {
+  let c = (props.code || '').trim()
+  if (c.startsWith('```')) {
+    const firstNewline = c.indexOf('\n')
+    if (firstNewline !== -1) {
+      c = c.substring(firstNewline + 1)
+    } else {
+      c = ''
+    }
+  }
+  if (c.endsWith('```')) {
+    c = c.substring(0, c.length - 3)
+  }
+  return c.trim()
+})
+
 const highlight = () => {
   nextTick(() => {
     if (codeEl.value) {
@@ -28,11 +45,11 @@ const highlight = () => {
 }
 
 onMounted(highlight)
-watch(() => props.code, highlight)
+watch(cleanCode, highlight)
 
 const copyCode = async () => {
   try {
-    await navigator.clipboard.writeText(props.code)
+    await navigator.clipboard.writeText(cleanCode.value)
     copied.value = true
     setTimeout(() => { copied.value = false }, 2000)
   } catch (e) {
@@ -54,7 +71,7 @@ const copyCode = async () => {
       </button>
     </div>
     <div class="overflow-x-auto p-4 text-sm font-mono leading-relaxed">
-      <pre class="!bg-transparent !p-0 !m-0"><code ref="codeEl" :class="`language-${language || 'text'}`">{{ code }}</code></pre>
+      <pre class="!bg-transparent !p-0 !m-0"><code ref="codeEl" :class="`language-${language || 'text'}`">{{ cleanCode }}</code></pre>
     </div>
   </div>
 </template>
