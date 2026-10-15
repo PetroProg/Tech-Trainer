@@ -87,6 +87,17 @@ export async function saveOfflinePack(pack: OfflinePack): Promise<void> {
   })
 }
 
+// saveOfflineCategory writes or updates a single category in IndexedDB
+export async function saveOfflineCategory(category: Category): Promise<void> {
+  const db = await initOfflineDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('categories', 'readwrite')
+    tx.objectStore('categories').put(category)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
 // getOfflineCategories retrieves stored categories and dynamically counts available questions
 export async function getOfflineCategories(): Promise<Category[]> {
   const db = await initOfflineDB()

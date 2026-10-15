@@ -62,6 +62,7 @@ func main() {
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/categories", apiHandler.GetCategories)
 		r.Post("/categories", apiHandler.CreateCategory)
+		r.Put("/categories/{id}", apiHandler.UpdateCategory)
 		r.Get("/questions/random", apiHandler.GetRandomQuestion)
 		r.Get("/questions/offline-pack", apiHandler.GetOfflinePack)
 		r.Post("/questions/{id}/answer", apiHandler.SubmitAnswer)

@@ -4,6 +4,7 @@ import CodeBlock from './components/CodeBlock.vue'
 import {
   getCategories,
   createCategory,
+  updateCategory,
   getRandomQuestion,
   submitAnswer,
   deleteQuestion,
@@ -50,6 +51,17 @@ const newCat = ref({
   prompt_instructions: ''
 })
 const creatingCategory = ref(false)
+
+// Edit Category State
+const categoryModalTab = ref<'create' | 'edit'>('create')
+const editingCat = ref<{
+  id: number
+  name: string
+  description: string
+  prompt_instructions: string
+}>({ id: 0, name: '', description: '', prompt_instructions: '' })
+const savingCategory = ref(false)
+const selectedEditCategoryId = ref<number | null>(null)
 
 // Lifecycle
 onMounted(async () => {
@@ -206,6 +218,43 @@ async function handleTriggerGeneration() {
   }
 }
 
+function openCreateCategoryModal() {
+  categoryModalTab.value = 'create'
+  showCategoryModal.value = true
+}
+
+function openEditCategoryModal(cat: Category) {
+  selectedEditCategoryId.value = cat.id
+  editingCat.value = {
+    id: cat.id,
+    name: cat.name,
+    description: cat.description,
+    prompt_instructions: cat.prompt_instructions
+  }
+  categoryModalTab.value = 'edit'
+  showCategoryModal.value = true
+}
+
+function onEditCategorySelect() {
+  const found = categories.value.find(c => c.id === selectedEditCategoryId.value)
+  if (found) {
+    editingCat.value = {
+      id: found.id,
+      name: found.name,
+      description: found.description,
+      prompt_instructions: found.prompt_instructions
+    }
+  }
+}
+
+function openEditCategoryForCurrentQuestion() {
+  if (!currentQuestion.value) return
+  const found = categories.value.find(c => c.id === currentQuestion.value?.category_id || c.slug === currentQuestion.value?.category_slug)
+  if (found) {
+    openEditCategoryModal(found)
+  }
+}
+
 async function handleCreateCategory() {
   if (!newCat.value.name) return
   creatingCategory.value = true
@@ -220,6 +269,34 @@ async function handleCreateCategory() {
     alert('Error: ' + e.message)
   } finally {
     creatingCategory.value = false
+  }
+}
+
+async function handleUpdateCategory() {
+  if (!editingCat.value || !editingCat.value.id) return
+  savingCategory.value = true
+  try {
+    const updated = await updateCategory(editingCat.value.id, {
+      name: editingCat.value.name,
+      description: editingCat.value.description,
+      prompt_instructions: editingCat.value.prompt_instructions
+    })
+
+    const idx = categories.value.findIndex(c => c.id === updated.id)
+    if (idx !== -1) {
+      categories.value[idx] = { ...categories.value[idx], ...updated }
+    }
+
+    if (currentQuestion.value && (currentQuestion.value.category_id === updated.id || currentQuestion.value.category_slug === updated.slug)) {
+      currentQuestion.value.category_name = updated.name
+    }
+
+    showCategoryModal.value = false
+    alert(`Category "${updated.name}" updated successfully!`)
+  } catch (e: any) {
+    alert('Error updating category: ' + (e?.message || e))
+  } finally {
+    savingCategory.value = false
   }
 }
 
@@ -362,14 +439,24 @@ function handleCategoryWheel(e: WheelEvent) {
           <span>{{ cat.name }}</span>
           <span 
             class="text-[10px] px-1.5 py-0.2 rounded-full font-bold"
-            :class="cat.available_questions < 5 ? 'bg-rose-900/60 text-rose-300' : 'bg-slate-800 text-slate-300'"
+            :class="cat.available_questions < 5 ? 'bg-rose-900/60 text-rose-300' : (selectedCategory === cat.slug ? 'bg-sky-700 text-white' : 'bg-slate-800 text-slate-300')"
           >
             {{ cat.available_questions }}
+          </span>
+          <span
+            v-if="selectedCategory === cat.slug"
+            @click.stop="openEditCategoryModal(cat)"
+            class="ml-0.5 p-0.5 hover:bg-sky-600 rounded transition text-sky-100 hover:text-white"
+            title="Edit category name & prompt"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+            </svg>
           </span>
         </button>
 
         <button
-          @click="showCategoryModal = true"
+          @click="openCreateCategoryModal"
           class="whitespace-nowrap px-3 py-1.5 rounded-xl font-medium bg-slate-800/80 border border-dashed border-slate-700 text-sky-400 hover:border-sky-500 hover:text-sky-300 transition"
         >
           + Category
@@ -415,8 +502,17 @@ function handleCategoryWheel(e: WheelEvent) {
         <!-- Metadata Row -->
         <div class="flex items-center justify-between mb-3 text-[11px]">
           <div class="flex items-center gap-2">
-            <span class="px-2.5 py-0.5 rounded-full font-semibold bg-sky-950 text-sky-400 border border-sky-800/50">
-              {{ currentQuestion.category_name }}
+            <span class="px-2.5 py-0.5 rounded-full font-semibold bg-sky-950 text-sky-400 border border-sky-800/50 flex items-center gap-1.5">
+              <span>{{ currentQuestion.category_name }}</span>
+              <button 
+                @click="openEditCategoryForCurrentQuestion" 
+                class="hover:text-sky-200 transition p-0.5" 
+                title="Edit category name & prompt"
+              >
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+                </svg>
+              </button>
             </span>
             <span 
               class="px-2 py-0.5 rounded-full uppercase tracking-wider font-bold"
@@ -555,68 +651,177 @@ function handleCategoryWheel(e: WheelEvent) {
       Self-hosted on <code class="text-slate-400">petroprog</code> <span class="mx-1.5 opacity-40">&bull;</span> Tailscale Mesh <span class="mx-1.5 opacity-40">&bull;</span> Powered by Qwen 2.5
     </footer>
 
-    <!-- New Category Modal -->
+    <!-- Category Modal (Create / Edit) -->
     <div v-if="showCategoryModal" class="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
       <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md w-full shadow-2xl">
-        <h3 class="text-base font-bold text-slate-100 flex items-center gap-2">
-          <svg class="w-4 h-4 text-sky-400" fill="currentColor" viewBox="0 0 20 20">
-            <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
-          </svg>
-          <span>New Question Category</span>
-        </h3>
-        <p class="text-xs text-slate-400 mt-1">
-          Define a technical domain. The local AI worker will begin generating practical challenges for it.
-        </p>
-
-        <form @submit.prevent="handleCreateCategory" class="mt-4 space-y-3">
-          <div>
-            <label class="block text-xs font-medium text-slate-300 mb-1">Category Title</label>
-            <input 
-              v-model="newCat.name" 
-              placeholder="e.g. Cybersecurity, Rust Systems, Kubernetes" 
-              required
-              class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500"
-            />
-          </div>
-
-          <div>
-            <label class="block text-xs font-medium text-slate-300 mb-1">Short Description</label>
-            <input 
-              v-model="newCat.description" 
-              placeholder="Network security, TLS handshake, exploits, privilege escalation..." 
-              required
-              class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500"
-            />
-          </div>
-
-          <div>
-            <label class="block text-xs font-medium text-slate-300 mb-1">AI Prompt Instructions</label>
-            <textarea 
-              v-model="newCat.prompt_instructions" 
-              rows="3"
-              placeholder="Topics: SQL injection, pcap analysis, auth bypass. Stack: Python, Bash. Level: Junior-Middle." 
-              required
-              class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500 leading-relaxed"
-            ></textarea>
-          </div>
-
-          <div class="flex items-center justify-end gap-2 pt-2">
+        <!-- Modal Tabs Header -->
+        <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+          <div class="flex items-center gap-2">
             <button 
               type="button" 
-              @click="showCategoryModal = false"
-              class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium"
+              @click="categoryModalTab = 'create'"
+              class="px-3 py-1.5 rounded-xl text-xs font-semibold transition"
+              :class="categoryModalTab === 'create' ? 'bg-sky-500 text-white shadow-md shadow-sky-500/20' : 'bg-slate-800 text-slate-400 hover:text-slate-200'"
             >
-              Cancel
+              + New Category
             </button>
             <button 
-              type="submit" 
-              :disabled="creatingCategory"
-              class="px-4 py-2 bg-sky-500 hover:bg-sky-400 text-white rounded-xl text-xs font-semibold shadow-md shadow-sky-500/20"
+              type="button" 
+              @click="categoryModalTab = 'edit'; if (!editingCat.id && categories.length) openEditCategoryModal(categories[0])"
+              class="px-3 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5"
+              :class="categoryModalTab === 'edit' ? 'bg-sky-500 text-white shadow-md shadow-sky-500/20' : 'bg-slate-800 text-slate-400 hover:text-slate-200'"
             >
-              {{ creatingCategory ? 'Creating...' : 'Create Category' }}
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+              </svg>
+              <span>Edit Category</span>
             </button>
           </div>
-        </form>
+
+          <button @click="showCategoryModal = false" class="text-slate-400 hover:text-white">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Create Form -->
+        <div v-if="categoryModalTab === 'create'">
+          <h3 class="text-base font-bold text-slate-100 flex items-center gap-2">
+            <svg class="w-4 h-4 text-sky-400" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
+            </svg>
+            <span>New Question Category</span>
+          </h3>
+          <p class="text-xs text-slate-400 mt-1">
+            Define a technical domain. The local AI worker will begin generating practical challenges for it.
+          </p>
+
+          <form @submit.prevent="handleCreateCategory" class="mt-4 space-y-3">
+            <div>
+              <label class="block text-xs font-medium text-slate-300 mb-1">Category Title</label>
+              <input 
+                v-model="newCat.name" 
+                placeholder="e.g. Cybersecurity, Rust Systems, Kubernetes" 
+                required
+                class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500"
+              />
+            </div>
+
+            <div>
+              <label class="block text-xs font-medium text-slate-300 mb-1">Short Description</label>
+              <input 
+                v-model="newCat.description" 
+                placeholder="Network security, TLS handshake, exploits, privilege escalation..." 
+                required
+                class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500"
+              />
+            </div>
+
+            <div>
+              <label class="block text-xs font-medium text-slate-300 mb-1">AI Prompt Instructions</label>
+              <textarea 
+                v-model="newCat.prompt_instructions" 
+                rows="3"
+                placeholder="Topics: SQL injection, pcap analysis, auth bypass. Stack: Python, Bash. Level: Junior-Middle." 
+                required
+                class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500 leading-relaxed"
+              ></textarea>
+            </div>
+
+            <div class="flex items-center justify-end gap-2 pt-2">
+              <button 
+                type="button" 
+                @click="showCategoryModal = false"
+                class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium"
+              >
+                Cancel
+              </button>
+              <button 
+                type="submit" 
+                :disabled="creatingCategory"
+                class="px-4 py-2 bg-sky-500 hover:bg-sky-400 text-white rounded-xl text-xs font-semibold shadow-md shadow-sky-500/20"
+              >
+                {{ creatingCategory ? 'Creating...' : 'Create Category' }}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Edit Form -->
+        <div v-else-if="categoryModalTab === 'edit'">
+          <h3 class="text-base font-bold text-slate-100 flex items-center gap-2">
+            <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+            </svg>
+            <span>Edit Category &amp; Prompts</span>
+          </h3>
+          <p class="text-xs text-slate-400 mt-1">
+            Update category title or customize the generation prompt used by the AI model.
+          </p>
+
+          <form @submit.prevent="handleUpdateCategory" class="mt-4 space-y-3">
+            <div>
+              <label class="block text-xs font-medium text-slate-300 mb-1">Select Category to Edit</label>
+              <select 
+                v-model="selectedEditCategoryId"
+                @change="onEditCategorySelect"
+                class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500"
+              >
+                <option v-for="cat in categories" :key="cat.id" :value="cat.id">
+                  {{ cat.name }} ({{ cat.available_questions }} questions)
+                </option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block text-xs font-medium text-slate-300 mb-1">Category Title</label>
+              <input 
+                v-model="editingCat.name" 
+                required
+                class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500"
+              />
+            </div>
+
+            <div>
+              <label class="block text-xs font-medium text-slate-300 mb-1">Short Description</label>
+              <input 
+                v-model="editingCat.description" 
+                class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500"
+              />
+            </div>
+
+            <div>
+              <label class="block text-xs font-medium text-slate-300 mb-1">AI Prompt Instructions</label>
+              <textarea 
+                v-model="editingCat.prompt_instructions" 
+                rows="4"
+                required
+                class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500 leading-relaxed font-mono"
+              ></textarea>
+              <p class="text-[11px] text-slate-500 mt-1">
+                Updated instructions will guide Ollama when generating future questions for this category.
+              </p>
+            </div>
+
+            <div class="flex items-center justify-end gap-2 pt-2">
+              <button 
+                type="button" 
+                @click="showCategoryModal = false"
+                class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium"
+              >
+                Cancel
+              </button>
+              <button 
+                type="submit" 
+                :disabled="savingCategory"
+                class="px-4 py-2 bg-sky-500 hover:bg-sky-400 text-white rounded-xl text-xs font-semibold shadow-md shadow-sky-500/20"
+              >
+                {{ savingCategory ? 'Saving...' : 'Save Changes' }}
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
 

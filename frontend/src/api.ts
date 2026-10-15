@@ -1,5 +1,6 @@
 import {
   saveOfflinePack,
+  saveOfflineCategory,
   getOfflineCategories,
   getOfflineQuestion,
   submitOfflineAnswer,
@@ -175,7 +176,24 @@ export async function createCategory(data: { name: string; description: string; 
     const err = await res.json();
     throw new Error(err.error || 'Failed to create category');
   }
-  return res.json();
+  const created: Category = await res.json();
+  saveOfflineCategory(created).catch(() => {});
+  return created;
+}
+
+export async function updateCategory(id: number, data: { name: string; description: string; prompt_instructions: string }): Promise<Category> {
+  const res = await fetch(`${API_BASE}/categories/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || 'Failed to update category');
+  }
+  const updated: Category = await res.json();
+  saveOfflineCategory(updated).catch(() => {});
+  return updated;
 }
 
 export async function getRandomQuestion(categorySlug?: string, difficulty?: string): Promise<Question> {

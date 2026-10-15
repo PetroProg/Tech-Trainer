@@ -131,6 +131,55 @@ func (a *API) CreateCategory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, cat)
 }
 
+// UpdateCategoryRequest defines the payload for updating an existing category.
+type UpdateCategoryRequest struct {
+	Name                string `json:"name"`
+	Description         string `json:"description"`
+	PromptInstructions  string `json:"prompt_instructions"`
+}
+
+// UpdateCategory modifies an existing category's name, description, and prompt instructions.
+func (a *API) UpdateCategory(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid category ID")
+		return
+	}
+
+	var req UpdateCategoryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid JSON payload")
+		return
+	}
+
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "Category name is required")
+		return
+	}
+
+	prompt := strings.TrimSpace(req.PromptInstructions)
+	if prompt == "" {
+		writeError(w, http.StatusBadRequest, "Prompt instructions are required")
+		return
+	}
+
+	err = a.database.UpdateCategory(id, name, strings.TrimSpace(req.Description), prompt)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to update category: "+err.Error())
+		return
+	}
+
+	updated, err := a.database.GetCategoryByID(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to fetch updated category: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, updated)
+}
+
 // GetRandomQuestion retrieves a random unsolved question matching filters.
 func (a *API) GetRandomQuestion(w http.ResponseWriter, r *http.Request) {
 	categorySlug := r.URL.Query().Get("category")

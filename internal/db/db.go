@@ -278,6 +278,39 @@ func (d *DB) GetCategoryBySlug(slug string) (*models.Category, error) {
 	return &c, nil
 }
 
+// GetCategoryByID fetches a category by its numeric ID.
+func (d *DB) GetCategoryByID(id int64) (*models.Category, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	var c models.Category
+	var activeInt int
+	var createdAt string
+	err := d.conn.QueryRow(`
+		SELECT id, slug, name, description, prompt_instructions, is_active, created_at
+		FROM categories WHERE id = ?
+	`, id).Scan(&c.ID, &c.Slug, &c.Name, &c.Description, &c.PromptInstructions, &activeInt, &createdAt)
+	if err != nil {
+		return nil, err
+	}
+	c.IsActive = activeInt == 1
+	c.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+	return &c, nil
+}
+
+// UpdateCategory modifies an existing category's name, description, and prompt instructions.
+func (d *DB) UpdateCategory(id int64, name, description, promptInstructions string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	_, err := d.conn.Exec(`
+		UPDATE categories
+		SET name = ?, description = ?, prompt_instructions = ?
+		WHERE id = ?
+	`, name, description, promptInstructions, id)
+	return err
+}
+
 // GetRandomQuestion selects a random unsolved question matching criteria, with repetition fallback.
 func (d *DB) GetRandomQuestion(categorySlug, difficulty string) (*models.Question, error) {
 	d.mu.RLock()
