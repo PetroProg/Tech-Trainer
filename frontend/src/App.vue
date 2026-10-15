@@ -241,6 +241,13 @@ function getOptionClass(optionId: number) {
   }
   return 'border-slate-800/60 bg-slate-900/20 text-slate-500 opacity-60'
 }
+
+function handleCategoryWheel(e: WheelEvent) {
+  const container = e.currentTarget as HTMLElement
+  if (container && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+    container.scrollLeft += e.deltaY
+  }
+}
 </script>
 
 <template>
@@ -336,7 +343,7 @@ function getOptionClass(optionId: number) {
       </div>
 
       <!-- Category Filter Pills -->
-      <div class="mt-3 flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar text-xs">
+      <div @wheel.passive="handleCategoryWheel" class="mt-3 flex items-center gap-2 overflow-x-auto pb-2.5 category-scrollbar text-xs">
         <button
           @click="selectedCategory = 'all'; nextQuestion()"
           class="whitespace-nowrap px-3 py-1.5 rounded-xl font-medium transition"
@@ -676,12 +683,24 @@ function getOptionClass(optionId: number) {
 </template>
 
 <style scoped>
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
+.category-scrollbar {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: #0ea5e9 #1e293b;
 }
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
+.category-scrollbar::-webkit-scrollbar {
+  height: 6px;
+}
+.category-scrollbar::-webkit-scrollbar-track {
+  background: #1e293b;
+  border-radius: 9999px;
+}
+.category-scrollbar::-webkit-scrollbar-thumb {
+  background: #0ea5e9;
+  border-radius: 9999px;
+}
+.category-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #38bdf8;
 }
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(6px); }
