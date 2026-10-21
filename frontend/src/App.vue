@@ -180,14 +180,41 @@ async function handleAnswer() {
   try {
     const res = await submitAnswer(currentQuestion.value.id, selectedOptionIds.value)
     answerResult.value = res
-    if (stats.value) {
+
+    // 1. Live update category counters immediately (instant 0ms response)
+    const targetCat = categories.value.find(c => 
+      c.id === currentQuestion.value?.category_id || 
+      c.slug === currentQuestion.value?.category_slug
+    )
+    if (targetCat && targetCat.available_questions > 0) {
+      targetCat.available_questions--
+      targetCat.solved_questions++
+    }
+
+    // 2. Live update global and category stats
+    if (stats.value && currentQuestion.value) {
       stats.value.current_streak = res.streak
       stats.value.total_score = res.total_score
       stats.value.total_answered++
       if (res.is_correct) stats.value.total_correct++
       stats.value.accuracy_percent = Math.round((stats.value.total_correct / stats.value.total_answered) * 100)
+
+      if (stats.value.by_category) {
+        const catSlug = currentQuestion.value.category_slug
+        const catStat = stats.value.by_category.find(cs => cs.slug === catSlug)
+        if (catStat) {
+          catStat.answered++
+          if (res.is_correct) catStat.correct++
+          catStat.accuracy = Math.round((catStat.correct / catStat.answered) * 100)
+        }
+      }
     }
+
     await refreshPendingCount()
+
+    // 3. Sync full data from server/cache in background
+    loadCategories().catch(() => {})
+    getUserStats().then(s => { if (s) stats.value = s }).catch(() => {})
   } catch (e: any) {
     alert('Failed to submit answer: ' + e.message)
   } finally {
@@ -200,6 +227,15 @@ async function handleDelete() {
   if (!confirm('Permanently delete this question from the database as invalid?')) return
 
   try {
+    const targetCat = categories.value.find(c => 
+      c.id === currentQuestion.value?.category_id || 
+      c.slug === currentQuestion.value?.category_slug
+    )
+    if (targetCat) {
+      if (targetCat.available_questions > 0) targetCat.available_questions--
+      if (targetCat.total_questions > 0) targetCat.total_questions--
+    }
+
     await deleteQuestion(currentQuestion.value.id)
     await nextQuestion()
     await loadCategories()
