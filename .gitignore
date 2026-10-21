@@ -27,3 +27,4 @@ frontend/.cache/
 *.swp
 .DS_Store
 Thumbs.db
+data/*.backup*

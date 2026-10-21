@@ -461,6 +461,28 @@ function getOptionClass(optionId: number) {
   return 'border-slate-800/60 bg-slate-900/20 text-slate-500 opacity-60'
 }
 
+function formatOptionText(text: string): string {
+  if (!text) return ''
+  let t = text
+
+  // Unescape accidental literal \n if not inside code quotes
+  if (t.includes('\\n') && !t.includes("'\\n'") && !t.includes('"\\n"')) {
+    t = t.replace(/\\n/g, '\n')
+  }
+
+  // Strip redundant "Outputs: " / "Output: " prefix if present
+  if (/^Outputs?:\s+/i.test(t)) {
+    t = t.replace(/^Outputs?:\s+/i, '')
+  }
+
+  return t.trim()
+}
+
+function hasMultipleLines(text: string): boolean {
+  if (!text) return false
+  return formatOptionText(text).includes('\n')
+}
+
 function handleCategoryWheel(e: WheelEvent) {
   const container = e.currentTarget as HTMLElement
   if (container && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
@@ -675,7 +697,7 @@ function handleCategoryWheel(e: WheelEvent) {
         </div>
 
         <!-- Question Prompt -->
-        <h2 class="text-base sm:text-lg font-medium text-slate-100 leading-snug">
+        <h2 class="text-base sm:text-lg font-medium text-slate-100 leading-snug whitespace-pre-line">
           {{ currentQuestion.question_text }}
         </h2>
 
@@ -704,8 +726,11 @@ function handleCategoryWheel(e: WheelEvent) {
                 <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
               </svg>
             </div>
-            <div class="flex-1 font-normal leading-relaxed">
-              {{ opt.option_text }}
+            <div 
+              class="flex-1 font-normal leading-relaxed whitespace-pre-line"
+              :class="{ 'font-mono text-xs leading-5': hasMultipleLines(opt.option_text) }"
+            >
+              {{ formatOptionText(opt.option_text) }}
             </div>
           </div>
         </div>

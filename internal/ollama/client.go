@@ -115,14 +115,23 @@ STRICT RULES & CONSTRAINTS:
    - ALL 4 options MUST BE COMPLETELY UNIQUE in text, syntax, and meaning. NEVER duplicate options!
    - DO NOT prefix options with letters or numbers (e.g. do NOT write "A. ", "B. ", "1. ", "Option 1:"). Write only the raw command, code, or answer text.
    - All distractors (incorrect options) must be realistic, plausible mistakes that people commonly make, but definitively invalid/incorrect.
-7. Domain Truth & Anti-Hallucination:
+   - Escape Characters & Multi-line Outputs:
+     * NEVER output unrendered escape characters like literal "\n" or "\t" in options, question text, or explanations.
+     * When predicting terminal output, format actual multiple lines naturally, DO NOT write "\n".
+     * In PHP, double quotes ("\n") MUST be used for newlines, never single quotes ('\n').
+     * DO NOT prefix options with "Outputs: " or "Output: ".
+7. Anti-Spoiler & Code Snippet Rule:
+   - When the question asks "Which command...", "Which PowerShell command...", "Which snippet...", or "Which of the following...", the candidate choices belong strictly in the options array!
+   - Under NO circumstances put the answer command or any option in the code field. For such questions, the code field MUST be empty "" (and language MUST be "").
+   - The code field is ONLY for code that the learner is asked to inspect/analyze (e.g. "What is the output of this code snippet?", "Find the bug in this function:").
+8. Domain Truth & Anti-Hallucination:
    - Cisco / Networking:
      * IPv4 interface address assignment strictly requires dotted-decimal subnet masks: "ip address 192.168.1.1 255.255.255.0". Prefix slash notation (e.g. "/24") is NEVER valid on Cisco IOS IPv4 interfaces!
      * "ip default-gateway" is only for Layer 2 switches or devices with "no ip routing". On a routing Cisco router, use a default static route: "ip route 0.0.0.0 0.0.0.0 <next-hop>".
      * Always distinguish between global config mode, interface mode, and line mode.
    - Code & Linux:
      * Use genuine syntax and standard library behaviors.
-8. Explanation:
+9. Explanation:
    - Detailed, rigorous explanation: explain why the correct choice(s) work under the hood, and explicitly explain why each distractor is wrong.
 
 STRICT JSON OUTPUT FORMAT (NO EXTRA KEYS):
@@ -218,6 +227,18 @@ STRICT JSON OUTPUT FORMAT (NO EXTRA KEYS):
 		cleaned := strings.TrimSpace(dto.Options[i])
 		cleaned = prefixRegex.ReplaceAllString(cleaned, "")
 		cleaned = strings.TrimSpace(cleaned)
+
+		// Unescape accidental literal \n if not inside code quotes
+		if strings.Contains(cleaned, `\n`) && !strings.Contains(cleaned, `'\n'`) && !strings.Contains(cleaned, `"\n"`) {
+			cleaned = strings.ReplaceAll(cleaned, `\n`, "\n")
+		}
+		// Strip redundant "Outputs: " / "Output: " prefixes
+		if strings.HasPrefix(cleaned, "Outputs: ") {
+			cleaned = strings.TrimPrefix(cleaned, "Outputs: ")
+		} else if strings.HasPrefix(cleaned, "Output: ") {
+			cleaned = strings.TrimPrefix(cleaned, "Output: ")
+		}
+		cleaned = strings.TrimSpace(cleaned)
 		if len(cleaned) == 0 {
 			return nil, fmt.Errorf("option %d is empty", i)
 		}
@@ -258,6 +279,53 @@ STRICT JSON OUTPUT FORMAT (NO EXTRA KEYS):
 		lowerQ := strings.ToLower(dto.Question)
 		if strings.Contains(lowerQ, "which two") || strings.Contains(lowerQ, "choose two") || strings.Contains(lowerQ, "select two") {
 			return nil, fmt.Errorf("mismatch: question says choose two, but correct_indices has 1 element")
+		}
+	}
+
+	// 6. Anti-spoiler guard: ensure code snippet does not duplicate or leak options
+	cleanCode := strings.TrimSpace(dto.Code)
+	if strings.HasPrefix(cleanCode, "```") {
+		lines := strings.Split(cleanCode, "\n")
+		if len(lines) >= 2 && strings.HasPrefix(lines[0], "```") && strings.HasSuffix(lines[len(lines)-1], "```") {
+			cleanCode = strings.TrimSpace(strings.Join(lines[1:len(lines)-1], "\n"))
+		}
+	}
+	dto.Code = cleanCode
+
+	if len(dto.Code) > 0 {
+		lowerQ := strings.ToLower(dto.Question)
+		isWhichCmd := strings.Contains(lowerQ, "which command") ||
+			strings.Contains(lowerQ, "what command") ||
+			strings.Contains(lowerQ, "which of the following command") ||
+			strings.Contains(lowerQ, "which powershell command") ||
+			strings.Contains(lowerQ, "which code snippet") ||
+			strings.Contains(lowerQ, "which snippet") ||
+			strings.Contains(lowerQ, "which of the following code") ||
+			strings.Contains(lowerQ, "which of the following snippets")
+
+		isAnalysisQuestion := strings.Contains(lowerQ, "output of") ||
+			strings.Contains(lowerQ, "what is the output") ||
+			strings.Contains(lowerQ, "error") ||
+			strings.Contains(lowerQ, "bug")
+
+		shouldClearSnippet := false
+		normCode := strings.Join(strings.Fields(dto.Code), " ")
+		for _, opt := range dto.Options {
+			normOpt := strings.Join(strings.Fields(opt), " ")
+			if normCode == normOpt || dto.Code == opt {
+				shouldClearSnippet = true
+				break
+			}
+		}
+
+		if !shouldClearSnippet && isWhichCmd && !isAnalysisQuestion {
+			shouldClearSnippet = true
+		}
+
+		if shouldClearSnippet {
+			dto.Code = ""
+			dto.Language = ""
+			dto.Type = "multiple_choice"
 		}
 	}
 

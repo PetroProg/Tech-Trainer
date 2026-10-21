@@ -156,7 +156,7 @@ func (d *DB) initSchema() error {
 				slug: "php",
 				name: "PHP",
 				desc: "Arrays, string operations, functions, associative arrays, and core web patterns.",
-				prompt: "Topics: PHP fundamentals (variables with $, array functions array_push/array_merge/in_array, associative arrays, foreach loops, string functions explode/implode/str_replace, isset/empty, basic functions, simple class/object properties). Level: Junior practical. Short snippets (4-8 lines) testing script output.",
+				prompt: "Topics: PHP fundamentals (variables with $, array functions array_push/array_merge/in_array, associative arrays, foreach loops, string functions explode/implode/str_replace, isset/empty, basic functions, simple class/object properties). In PHP, string escape sequences like \\n MUST use double quotes (\"\\n\"), never single quotes ('\\n'). Level: Junior practical. Short snippets (4-8 lines) testing script output.",
 			},
 			{
 				slug: "csharp",
@@ -480,6 +480,45 @@ func (d *DB) SaveGeneratedQuestion(dto models.GeneratedQuestionDTO, categoryID i
 		return false, err
 	}
 	defer tx.Rollback()
+
+	cleanCode := strings.TrimSpace(dto.Code)
+	if strings.HasPrefix(cleanCode, "```") {
+		lines := strings.Split(cleanCode, "\n")
+		if len(lines) >= 2 && strings.HasPrefix(lines[0], "```") && strings.HasSuffix(lines[len(lines)-1], "```") {
+			cleanCode = strings.TrimSpace(strings.Join(lines[1:len(lines)-1], "\n"))
+		}
+	}
+	dto.Code = cleanCode
+
+	if len(dto.Code) > 0 {
+		lowerQ := strings.ToLower(dto.Question)
+		isWhichCmd := strings.Contains(lowerQ, "which command") ||
+			strings.Contains(lowerQ, "what command") ||
+			strings.Contains(lowerQ, "which of the following command") ||
+			strings.Contains(lowerQ, "which powershell command") ||
+			strings.Contains(lowerQ, "which code snippet") ||
+			strings.Contains(lowerQ, "which snippet")
+
+		isAnalysis := strings.Contains(lowerQ, "output of") ||
+			strings.Contains(lowerQ, "what is the output") ||
+			strings.Contains(lowerQ, "error") ||
+			strings.Contains(lowerQ, "bug")
+
+		normCode := strings.Join(strings.Fields(dto.Code), " ")
+		for _, opt := range dto.Options {
+			normOpt := strings.Join(strings.Fields(opt), " ")
+			if normCode == normOpt || dto.Code == strings.TrimSpace(opt) {
+				dto.Code = ""
+				dto.Language = ""
+				break
+			}
+		}
+
+		if dto.Code != "" && isWhichCmd && !isAnalysis {
+			dto.Code = ""
+			dto.Language = ""
+		}
+	}
 
 	qType := dto.Type
 	if qType == "" {
