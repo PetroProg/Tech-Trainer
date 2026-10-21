@@ -40,6 +40,7 @@ export interface Question {
   language: string;
   explanation: string;
   options: Option[];
+  expected_correct_count?: number;
   is_solved?: boolean;
 }
 

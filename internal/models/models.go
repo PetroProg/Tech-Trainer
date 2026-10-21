@@ -27,38 +27,40 @@ type Option struct {
 
 // Question represents a challenge with options and an explanation.
 type Question struct {
-	ID           int64     `json:"id"`
-	CategoryID   int64     `json:"category_id"`
-	CategorySlug string    `json:"category_slug,omitempty"`
-	CategoryName string    `json:"category_name,omitempty"`
-	Type         string    `json:"type"`       // "multiple_choice" or "code_analysis"
-	Difficulty   string    `json:"difficulty"` // "junior" or "middle"
-	QuestionText string    `json:"question_text"`
-	CodeSnippet  string    `json:"code_snippet"`
-	Language     string    `json:"language"`
-	Explanation  string    `json:"explanation"`
-	Hash         string    `json:"-"`
-	Options      []Option  `json:"options"`
-	IsSolved     bool      `json:"is_solved"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID                   int64     `json:"id"`
+	CategoryID           int64     `json:"category_id"`
+	CategorySlug         string    `json:"category_slug,omitempty"`
+	CategoryName         string    `json:"category_name,omitempty"`
+	Type                 string    `json:"type"`       // "multiple_choice" or "code_analysis"
+	Difficulty           string    `json:"difficulty"` // "junior" or "middle"
+	QuestionText         string    `json:"question_text"`
+	CodeSnippet          string    `json:"code_snippet"`
+	Language             string    `json:"language"`
+	Explanation          string    `json:"explanation"`
+	Hash                 string    `json:"-"`
+	Options              []Option  `json:"options"`
+	ExpectedCorrectCount int       `json:"expected_correct_count"`
+	IsSolved             bool      `json:"is_solved"`
+	CreatedAt            time.Time `json:"created_at"`
 }
 
 // OfflineQuestion includes preloaded validation data for autonomous offline execution.
 type OfflineQuestion struct {
-	ID               int64     `json:"id"`
-	CategoryID       int64     `json:"category_id"`
-	CategorySlug     string    `json:"category_slug"`
-	CategoryName     string    `json:"category_name"`
-	Type             string    `json:"type"`
-	Difficulty       string    `json:"difficulty"`
-	QuestionText     string    `json:"question_text"`
-	CodeSnippet      string    `json:"code_snippet"`
-	Language         string    `json:"language"`
-	Explanation      string    `json:"explanation"`
-	Options          []Option  `json:"options"`
-	CorrectOptionIDs []int64   `json:"correct_option_ids"`
-	IsSolved         bool      `json:"is_solved"`
-	CreatedAt        time.Time `json:"created_at"`
+	ID                   int64     `json:"id"`
+	CategoryID           int64     `json:"category_id"`
+	CategorySlug         string    `json:"category_slug"`
+	CategoryName         string    `json:"category_name"`
+	Type                 string    `json:"type"`
+	Difficulty           string    `json:"difficulty"`
+	QuestionText         string    `json:"question_text"`
+	CodeSnippet          string    `json:"code_snippet"`
+	Language             string    `json:"language"`
+	Explanation          string    `json:"explanation"`
+	Options              []Option  `json:"options"`
+	ExpectedCorrectCount int       `json:"expected_correct_count"`
+	CorrectOptionIDs     []int64   `json:"correct_option_ids"`
+	IsSolved             bool      `json:"is_solved"`
+	CreatedAt            time.Time `json:"created_at"`
 }
 
 // OfflinePack represents all categories and questions downloaded for disconnected play.

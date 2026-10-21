@@ -526,7 +526,9 @@ function handleCategoryWheel(e: WheelEvent) {
           </div>
 
           <span class="text-slate-400 font-medium">
-            1 - 4 Correct Answers
+            <span v-if="currentQuestion.expected_correct_count === 1">Single Choice (Select 1)</span>
+            <span v-else-if="currentQuestion.expected_correct_count && currentQuestion.expected_correct_count > 1">Multiple Choice (Choose {{ currentQuestion.expected_correct_count }})</span>
+            <span v-else>1 - 4 Correct Answers</span>
           </span>
         </div>
 

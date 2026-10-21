@@ -404,6 +404,9 @@ func (d *DB) GetRandomQuestion(categorySlug, difficulty string) (*models.Questio
 		var isCorrectInt int
 		if err := optRows.Scan(&o.ID, &o.QuestionID, &o.OptionText, &isCorrectInt, &o.OrderIndex); err == nil {
 			o.IsCorrect = isCorrectInt == 1
+			if o.IsCorrect {
+				q.ExpectedCorrectCount++
+			}
 			q.Options = append(q.Options, o)
 		}
 	}
@@ -749,6 +752,7 @@ func (d *DB) GetOfflinePack() (*models.OfflinePack, error) {
 					q.Options = append(q.Options, o)
 					if o.IsCorrect {
 						q.CorrectOptionIDs = append(q.CorrectOptionIDs, o.ID)
+						q.ExpectedCorrectCount++
 					}
 				}
 			}

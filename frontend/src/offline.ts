@@ -193,6 +193,7 @@ export async function getOfflineQuestion(categorySlug?: string, difficulty?: str
         language: chosen.language,
         explanation: chosen.explanation,
         options: sanitizedOptions,
+        expected_correct_count: chosen.correct_option_ids?.length || 1,
         is_solved: chosen.is_solved
       })
     }
