@@ -3,6 +3,7 @@ package db
 import (
 	"crypto/sha256"
 	"database/sql"
+	"math"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -700,7 +701,7 @@ func (d *DB) SyncAnswers(items []models.SyncAnswerItem) (*models.SyncAnswersResp
 		FROM user_answers
 	`).Scan(&stats.TotalAnswered, &stats.TotalCorrect)
 	if stats.TotalAnswered > 0 {
-		stats.AccuracyPercent = float64(stats.TotalCorrect) / float64(stats.TotalAnswered) * 100.0
+		stats.AccuracyPercent = math.Round(float64(stats.TotalCorrect) / float64(stats.TotalAnswered) * 100.0)
 	}
 
 	return &models.SyncAnswersResponse{
@@ -865,7 +866,7 @@ func (d *DB) GetUserStats() (*models.UserStats, error) {
 			if err := catRows.Scan(&cs.CategoryName, &cs.CategorySlug, &cs.TotalAnswered, &corr); err == nil {
 				cs.TotalCorrect = int(corr.Int64)
 				if cs.TotalAnswered > 0 {
-					cs.AccuracyPercent = float64(cs.TotalCorrect) / float64(cs.TotalAnswered) * 100.0
+					cs.AccuracyPercent = math.Round(float64(cs.TotalCorrect) / float64(cs.TotalAnswered) * 100.0)
 				}
 				stats.ByCategory = append(stats.ByCategory, cs)
 			}
@@ -874,4 +875,13 @@ func (d *DB) GetUserStats() (*models.UserStats, error) {
 	}
 
 	return stats, nil
+}
+
+// ResetStats clears all recorded user answers, resetting scores and progress.
+func (d *DB) ResetStats() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	_, err := d.conn.Exec(`DELETE FROM user_answers`)
+	return err
 }

@@ -257,6 +257,15 @@ func (a *API) GetStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stats)
 }
 
+// ResetStats clears user answers and resets performance metrics.
+func (a *API) ResetStats(w http.ResponseWriter, r *http.Request) {
+	if err := a.database.ResetStats(); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "User statistics and progress have been reset."})
+}
+
 // GetWorkerStatus returns the current Ollama and background worker state.
 func (a *API) GetWorkerStatus(w http.ResponseWriter, r *http.Request) {
 	status := a.worker.GetStatus()

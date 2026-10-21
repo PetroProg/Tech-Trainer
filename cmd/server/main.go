@@ -69,6 +69,7 @@ func main() {
 		r.Post("/sync/answers", apiHandler.SyncAnswers)
 		r.Delete("/questions/{id}", apiHandler.DeleteQuestion)
 		r.Get("/stats", apiHandler.GetStats)
+		r.Post("/stats/reset", apiHandler.ResetStats)
 		r.Get("/worker/status", apiHandler.GetWorkerStatus)
 		r.Post("/worker/trigger", apiHandler.TriggerWorker)
 	})

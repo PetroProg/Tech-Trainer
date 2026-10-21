@@ -10,6 +10,7 @@ import {
   submitAnswer,
   deleteQuestion,
   getUserStats,
+  resetStats,
   getWorkerStatus,
   triggerWorker,
   downloadAndCacheOfflinePack,
@@ -20,7 +21,7 @@ import {
   type UserStats,
   type WorkerStatus
 } from './api'
-import { getPendingAnswersCount } from './offline'
+import { getPendingAnswersCount, resetOfflineStats } from './offline'
 
 // Application State
 const categories = ref<Category[]>([])
@@ -317,6 +318,35 @@ async function handleDelete() {
     await loadCategories()
   } catch (e: any) {
     await showAlert('Failed to delete question: ' + (e?.message || e), 'error', 'Deletion Error')
+  }
+}
+
+async function handleResetStats() {
+  const confirmed = await showConfirm(
+    'Are you sure you want to reset all your statistics and answered question history? This will clear answered questions and start fresh.',
+    { title: 'Reset Statistics', danger: true, confirmText: 'Reset Stats' }
+  )
+  if (!confirmed) return
+
+  try {
+    if (isOnline.value) {
+      await resetStats()
+    }
+    await resetOfflineStats().catch(() => {})
+    stats.value = {
+      total_answered: 0,
+      total_correct: 0,
+      accuracy_percent: 0,
+      current_streak: 0,
+      total_score: 0,
+      by_category: []
+    }
+    await refreshPendingCount()
+    await loadCategories()
+    await nextQuestion()
+    await showAlert('Your statistics and question history have been reset!', 'success', 'Stats Reset')
+  } catch (e: any) {
+    await showAlert('Failed to reset stats: ' + (e?.message || e), 'error', 'Reset Error')
   }
 }
 
@@ -999,7 +1029,7 @@ function handleCategoryWheel(e: WheelEvent) {
             <div class="text-[10px] text-slate-400 mt-0.5">Answered</div>
           </div>
           <div class="p-3 bg-slate-950 border border-slate-800 rounded-xl">
-            <div class="text-xl font-bold text-emerald-400">{{ stats?.accuracy_percent || 0 }}%</div>
+            <div class="text-xl font-bold text-emerald-400">{{ Math.round(stats?.accuracy_percent || 0) }}%</div>
             <div class="text-[10px] text-slate-400 mt-0.5">Accuracy</div>
           </div>
           <div class="p-3 bg-slate-950 border border-slate-800 rounded-xl">
@@ -1031,12 +1061,26 @@ function handleCategoryWheel(e: WheelEvent) {
           </div>
         </div>
 
-        <button 
-          @click="showStatsModal = false"
-          class="w-full mt-5 py-2.5 bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/80 rounded-xl text-xs font-semibold transition active:scale-[0.98]"
-        >
-          Close
-        </button>
+        <div class="mt-5 flex items-center gap-2">
+          <button 
+            type="button"
+            @click="handleResetStats"
+            class="px-3.5 py-2.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 rounded-xl text-xs font-semibold transition active:scale-[0.98] flex items-center justify-center gap-1.5"
+            title="Reset all performance statistics"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+            <span>Reset Stats</span>
+          </button>
+          <button 
+            type="button"
+            @click="showStatsModal = false"
+            class="flex-1 py-2.5 bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/80 rounded-xl text-xs font-semibold transition active:scale-[0.98]"
+          >
+            Close
+          </button>
+        </div>
       </div>
           </Transition>
         </div>

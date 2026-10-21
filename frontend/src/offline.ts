@@ -359,3 +359,32 @@ export async function getOfflineStats(): Promise<UserStats> {
     req.onerror = () => reject(req.error)
   })
 }
+
+// resetOfflineStats clears local performance metrics and marks offline questions unsolved
+export async function resetOfflineStats(): Promise<void> {
+  const db = await initOfflineDB()
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(['questions', 'pending_answers', 'meta'], 'readwrite')
+    const qStore = tx.objectStore('questions')
+    const pendingStore = tx.objectStore('pending_answers')
+    const metaStore = tx.objectStore('meta')
+
+    metaStore.delete('stats')
+    pendingStore.clear()
+
+    const req = qStore.getAll()
+    req.onsuccess = () => {
+      const questions: OfflineQuestion[] = req.result || []
+      for (const q of questions) {
+        if (q.is_solved) {
+          q.is_solved = false
+          qStore.put(q)
+        }
+      }
+    }
+
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}

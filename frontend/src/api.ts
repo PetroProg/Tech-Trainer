@@ -281,3 +281,12 @@ export async function triggerWorker(): Promise<{ message: string }> {
   if (!res.ok) throw new Error(data.message || 'Worker trigger failed');
   return data;
 }
+
+export async function resetStats(): Promise<{ message: string }> {
+  const res = await fetch(`${API_BASE}/stats/reset`, {
+    method: 'POST'
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || 'Reset failed');
+  return data;
+}
