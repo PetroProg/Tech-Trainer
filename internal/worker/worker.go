@@ -170,7 +170,7 @@ func (w *Worker) generateCategoryBatches(ctx context.Context, categories []model
 	totalGenerated := 0
 	totalSaved := 0
 
-	difficulties := []string{"junior", "junior", "middle"} // 2/3 Junior, 1/3 Middle
+	difficulties := []string{"junior"} // 100% Junior practical level (no middle complexity)
 
 	for _, cat := range categories {
 		// Calculate how many questions are actually needed to reach 50

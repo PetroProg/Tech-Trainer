@@ -10,6 +10,12 @@ import 'prismjs/components/prism-docker'
 import 'prismjs/components/prism-json'
 import 'prismjs/components/prism-javascript'
 import 'prismjs/components/prism-typescript'
+import 'prismjs/components/prism-markup-templating'
+import 'prismjs/components/prism-php'
+import 'prismjs/components/prism-csharp'
+import 'prismjs/components/prism-powershell'
+import 'prismjs/components/prism-c'
+import 'prismjs/components/prism-cpp'
 
 const props = defineProps<{
   code: string
@@ -18,6 +24,32 @@ const props = defineProps<{
 
 const codeEl = ref<HTMLElement | null>(null)
 const copied = ref(false)
+
+const normalizedLang = computed(() => {
+  const l = (props.language || '').toLowerCase().trim()
+  switch (l) {
+    case 'c#':
+    case 'cs':
+      return 'csharp'
+    case 'c++':
+      return 'cpp'
+    case 'js':
+      return 'javascript'
+    case 'ts':
+      return 'typescript'
+    case 'py':
+      return 'python'
+    case 'golang':
+      return 'go'
+    case 'ps1':
+    case 'ps':
+      return 'powershell'
+    case 'sh':
+      return 'bash'
+    default:
+      return l || 'text'
+  }
+})
 
 // Strip leading ```lang and trailing ``` if model wrapped snippet in markdown fences
 const cleanCode = computed(() => {
@@ -71,7 +103,7 @@ const copyCode = async () => {
       </button>
     </div>
     <div class="overflow-x-auto p-4 text-sm font-mono leading-relaxed">
-      <pre class="!bg-transparent !p-0 !m-0"><code ref="codeEl" :class="`language-${language || 'text'}`">{{ cleanCode }}</code></pre>
+      <pre class="!bg-transparent !p-0 !m-0"><code ref="codeEl" :class="`language-${normalizedLang}`">{{ cleanCode }}</code></pre>
     </div>
   </div>
 </template>

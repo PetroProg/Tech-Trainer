@@ -134,22 +134,58 @@ func (d *DB) initSchema() error {
 			slug, name, desc, prompt string
 		}{
 			{
-				slug: "ai-neural-networks",
-				name: "AI & Neural Networks",
-				desc: "Transformer architectures, attention mechanisms, LoRA/QLoRA, RAG, Ollama/vLLM, and vector databases.",
-				prompt: "Topics: Transformer architecture (Self-Attention, KV-cache, RoPE), Fine-tuning (LoRA, QLoRA, rank, alpha), RAG (embeddings, chunking strategies, hybrid search), Inference (Ollama, vLLM, quantization GGUF/AWQ), Vector DBs (Chroma, Qdrant, Milvus, distance metrics). Target level: Junior and solid Middle. Practical questions and code snippets in Python (PyTorch/Transformers/LangChain) or engine configs.",
+				slug: "python",
+				name: "Python",
+				desc: "Core syntax, data types, lists, dictionaries, strings, loops, and built-in functions.",
+				prompt: "Topics: Python basics (variables, types, string slicing/methods, list comprehensions, dict/set methods, for/while loops, functions, args/kwargs, basic try/except, open() file operations, json/math/random libraries). Level: Junior practical. Questions should be short code snippets (4-8 lines) testing output prediction, return values, or identifying simple bugs.",
+			},
+			{
+				slug: "golang",
+				name: "Go",
+				desc: "Slices, maps, structs, error handling, pointers, and foundational Go idioms.",
+				prompt: "Topics: Go fundamentals (variables, struct definitions, slices and append(), maps, for range loops, functions returning multiple values/errors, defer basics, fmt formatting). Level: Junior practical. Short snippets (5-10 lines) testing code output, type checking, or slice behavior.",
+			},
+			{
+				slug: "javascript",
+				name: "JavaScript",
+				desc: "Variables (let/const), arrow functions, array methods, objects, JSON, and Promises.",
+				prompt: "Topics: Modern JavaScript (ES6+ variables let/const, arrow functions, template literals, array methods map/filter/reduce/find, object destructuring, JSON.parse/stringify, basic Promises/async-await, typeof/equality == vs ===). Level: Junior practical. Fast snippets (4-8 lines) testing return values, truthy/falsy, and array outputs.",
+			},
+			{
+				slug: "php",
+				name: "PHP",
+				desc: "Arrays, string operations, functions, associative arrays, and core web patterns.",
+				prompt: "Topics: PHP fundamentals (variables with $, array functions array_push/array_merge/in_array, associative arrays, foreach loops, string functions explode/implode/str_replace, isset/empty, basic functions, simple class/object properties). Level: Junior practical. Short snippets (4-8 lines) testing script output.",
+			},
+			{
+				slug: "csharp",
+				name: "C#",
+				desc: ".NET fundamentals, types, classes, basic LINQ, lists, and string manipulation.",
+				prompt: "Topics: C# & .NET fundamentals (types, strings, List<T>, arrays, foreach loops, basic LINQ queries like .Where() / .Select(), simple class/struct properties, nullables, switch expressions, method signatures). Level: Junior practical. Short clean snippets (5-10 lines) testing console output or return values.",
+			},
+			{
+				slug: "powershell",
+				name: "PowerShell",
+				desc: "Cmdlets, pipelines, variables, loops, objects, and Windows scripting.",
+				prompt: "Topics: PowerShell fundamentals (Get-Command, Get-Service, Get-Process, Where-Object, Select-Object, ForEach-Object, pipeline chaining |, variables with $, arrays, hash tables @{}, -eq / -match operators, string formatting). Level: Junior practical. Short 2-5 line commands/scripts testing command output or pipeline results.",
+			},
+			{
+				slug: "cpp",
+				name: "C++",
+				desc: "Variables, vectors, basic pointers/references, functions, and standard I/O.",
+				prompt: "Topics: C++ fundamentals (std::cout, std::vector, basic loops, functions, references & vs pointers *, pass by value vs reference, struct/class member access, simple string operations, basic header usage). Level: Junior practical. Short snippets (5-10 lines) testing output and basic variable tracing.",
 			},
 			{
 				slug: "devops-linux",
 				name: "DevOps & Linux",
-				desc: "Systemd, networking/iptables, Docker, Kubernetes, memory/OOM troubleshooting, and bash scripting.",
-				prompt: "Topics: Linux internals (systemd units, journalctl, cgroups, /proc), Networking (iptables, netfilter, DNS, TCP states, curl, ss/netstat), Docker (multi-stage builds, layers, networking, security, storage), Kubernetes basics (Pods, Deployments, Services, ConfigMaps), OOM killer, exit codes, Bash debugging (set -euo pipefail, regex, sed, awk). Target level: Junior and moderate Middle.",
+				desc: "Linux commands, systemd, basic Docker, file permissions, and bash scripting.",
+				prompt: "Topics: Practical Linux basics (chmod/chown, grep, sed, awk, find, curl, systemctl, journalctl, tar, ps/kill, Docker run/ps/logs/build, simple bash script loops and exit codes). Level: Junior practical. Direct questions on command usage, flags, or script output.",
 			},
 			{
-				slug: "it-languages",
-				name: "Languages & Runtimes",
-				desc: "Go (goroutines, channels, race conditions), Python (GIL, async, generators), Rust (ownership, lifetimes), SQL (indexing, EXPLAIN).",
-				prompt: "Topics: Golang (goroutines, channels, sync.Mutex/RWMutex, defer, interfaces, context, memory leaks), Python (GIL, asyncio, decorators, memory management, generators), Rust (ownership, borrowing, lifetimes basics, Result/Option), SQL (B-Tree indexes, compound indexes, EXPLAIN ANALYZE, transaction isolation, JOIN types). Target level: Junior and solid Middle. Realistic code snippets testing output analysis or subtle bugs.",
+				slug: "cisco-networking",
+				name: "Cisco Networking",
+				desc: "Cisco IOS configuration, IP addressing, static routing, VLANs, and CCNA essentials.",
+				prompt: "Topics: Cisco CCNA fundamentals (Cisco IOS CLI modes, IPv4 subnetting strictly using dotted-decimal masks like 255.255.255.0, static route ip route 0.0.0.0 0.0.0.0 <next-hop>, basic VLANs switchport mode access/trunk, show ip interface brief, show ip route, basic ping/traceroute). Level: Junior practical. Fast CLI command recognition and troubleshooting.",
 			},
 		}
 

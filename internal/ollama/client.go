@@ -95,27 +95,34 @@ func (c *Client) GenerateQuestion(ctx context.Context, categoryName, promptInstr
 Your mission is to formulate exactly 1 high-quality, practical, 100% factually accurate engineering examination challenge.
 
 STRICT RULES & CONSTRAINTS:
-1. Difficulty: Junior or Moderate Middle. Realistic real-world situations, configuration syntax, troubleshooting, or code tracing.
-2. Language: Professional, concise, grammatical English.
-3. Options: Exactly 4 options.
-4. Correct Answers Policy:
+1. Target Audience & Difficulty: STRICT JUNIOR / PRACTICAL ENTRY-LEVEL ONLY.
+   - The user is NOT an advanced developer. Keep challenges accessible, clear, and practical.
+   - Focus on essential language syntax, common data structures (lists, arrays, dicts, slices, maps, strings), basic loops, conditions, and popular standard library functions.
+   - STRICTLY FORBIDDEN: Deep runtime internals, complex concurrency/multithreading race conditions, low-level memory allocation, reflection, or complex architectural patterns.
+2. Code Snippets & Speed (Fast Code Trainer):
+   - Keep code snippets SHORT, CLEAN, and FAST TO READ (4 to 10 lines max).
+   - Questions must be quick and direct: "What is the output of this code?", "Which line contains a bug or syntax error?", "What does this function return?", "Which snippet accomplishes X?".
+   - A learner should be able to read, understand, and answer in 15 to 30 seconds.
+3. Language: Professional, concise, grammatical English.
+4. Options: Exactly 4 options.
+5. Correct Answers Policy:
    - For ~75% of questions: exactly 1 correct answer (single-choice). correct_indices: [X].
    - For ~25% of questions: exactly 2 correct answers (multi-select). correct_indices: [X, Y].
    - NEVER generate 0, 3, or 4 correct answers.
    - MANDATORY CLARITY: If exactly 2 options are correct, the question text MUST end with " (Choose two)".
    - If only 1 option is correct, the question MUST NOT say "select all that apply" or "choose two". Phrasing must be "Which command...", "What is the result...", or "(Choose one)".
-5. Option Uniqueness & Formatting:
+6. Option Uniqueness & Formatting:
    - ALL 4 options MUST BE COMPLETELY UNIQUE in text, syntax, and meaning. NEVER duplicate options!
    - DO NOT prefix options with letters or numbers (e.g. do NOT write "A. ", "B. ", "1. ", "Option 1:"). Write only the raw command, code, or answer text.
    - All distractors (incorrect options) must be realistic, plausible mistakes that people commonly make, but definitively invalid/incorrect.
-6. Domain Truth & Anti-Hallucination:
+7. Domain Truth & Anti-Hallucination:
    - Cisco / Networking:
      * IPv4 interface address assignment strictly requires dotted-decimal subnet masks: "ip address 192.168.1.1 255.255.255.0". Prefix slash notation (e.g. "/24") is NEVER valid on Cisco IOS IPv4 interfaces!
      * "ip default-gateway" is only for Layer 2 switches or devices with "no ip routing". On a routing Cisco router, use a default static route: "ip route 0.0.0.0 0.0.0.0 <next-hop>".
      * Always distinguish between global config mode, interface mode, and line mode.
    - Code & Linux:
      * Use genuine syntax and standard library behaviors.
-7. Explanation:
+8. Explanation:
    - Detailed, rigorous explanation: explain why the correct choice(s) work under the hood, and explicitly explain why each distractor is wrong.
 
 STRICT JSON OUTPUT FORMAT (NO EXTRA KEYS):
