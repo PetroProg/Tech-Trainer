@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import CodeBlock from './components/CodeBlock.vue'
+import ModalDialog from './components/ModalDialog.vue'
 import {
   getCategories,
   createCategory,
@@ -62,6 +63,77 @@ const editingCat = ref<{
 }>({ id: 0, name: '', description: '', prompt_instructions: '' })
 const savingCategory = ref(false)
 const selectedEditCategoryId = ref<number | null>(null)
+
+// Custom Dialog / Popup State
+interface DialogState {
+  show: boolean
+  title?: string
+  message: string
+  type?: 'info' | 'success' | 'warning' | 'error' | 'confirm'
+  confirmText?: string
+  cancelText?: string
+  danger?: boolean
+  resolve?: (confirmed: boolean) => void
+}
+
+const dialog = ref<DialogState>({
+  show: false,
+  title: '',
+  message: '',
+  type: 'info',
+  confirmText: '',
+  cancelText: 'Cancel',
+  danger: false
+})
+
+function showDialog(options: {
+  title?: string
+  message: string
+  type?: 'info' | 'success' | 'warning' | 'error' | 'confirm'
+  confirmText?: string
+  cancelText?: string
+  danger?: boolean
+}): Promise<boolean> {
+  return new Promise((resolve) => {
+    dialog.value = {
+      show: true,
+      title: options.title || '',
+      message: options.message,
+      type: options.type || 'info',
+      confirmText: options.confirmText || '',
+      cancelText: options.cancelText || 'Cancel',
+      danger: !!options.danger,
+      resolve
+    }
+  })
+}
+
+function onDialogConfirm() {
+  const res = dialog.value.resolve
+  dialog.value.show = false
+  if (res) res(true)
+}
+
+function onDialogCancel() {
+  const res = dialog.value.resolve
+  dialog.value.show = false
+  if (res) res(false)
+}
+
+function showAlert(message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info', title?: string) {
+  return showDialog({ message, type, title })
+}
+
+function showConfirm(message: string, options?: { title?: string; confirmText?: string; cancelText?: string; danger?: boolean }) {
+  return showDialog({
+    message,
+    type: 'confirm',
+    title: options?.title || 'Confirm Action',
+    confirmText: options?.confirmText || 'Confirm',
+    cancelText: options?.cancelText || 'Cancel',
+    danger: options?.danger ?? false
+  })
+}
 
 // Lifecycle
 onMounted(async () => {
@@ -216,7 +288,7 @@ async function handleAnswer() {
     loadCategories().catch(() => {})
     getUserStats().then(s => { if (s) stats.value = s }).catch(() => {})
   } catch (e: any) {
-    alert('Failed to submit answer: ' + e.message)
+    await showAlert('Failed to submit answer: ' + (e?.message || e), 'error', 'Submission Failed')
   } finally {
     submitting.value = false
   }
@@ -224,7 +296,11 @@ async function handleAnswer() {
 
 async function handleDelete() {
   if (!currentQuestion.value) return
-  if (!confirm('Permanently delete this question from the database as invalid?')) return
+  const confirmed = await showConfirm(
+    'Are you sure you want to permanently delete this question from the database as invalid?',
+    { title: 'Delete Question', danger: true, confirmText: 'Delete Question' }
+  )
+  if (!confirmed) return
 
   try {
     const targetCat = categories.value.find(c => 
@@ -240,17 +316,17 @@ async function handleDelete() {
     await nextQuestion()
     await loadCategories()
   } catch (e: any) {
-    alert('Failed to delete question: ' + e.message)
+    await showAlert('Failed to delete question: ' + (e?.message || e), 'error', 'Deletion Error')
   }
 }
 
 async function handleTriggerGeneration() {
   try {
     const res = await triggerWorker()
-    alert(res.message)
+    await showAlert(res.message, 'info', 'AI Generation')
     await loadWorkerStatus()
   } catch (e: any) {
-    alert(e.message)
+    await showAlert(e?.message || 'Failed to trigger worker', 'error', 'Generation Error')
   }
 }
 
@@ -300,9 +376,9 @@ async function handleCreateCategory() {
     newCat.value = { name: '', description: '', prompt_instructions: '' }
     await loadCategories()
     await loadWorkerStatus()
-    alert('Category created successfully! Background generator started.')
+    await showAlert('Category created successfully! Background generator started.', 'success', 'Category Created')
   } catch (e: any) {
-    alert('Error: ' + e.message)
+    await showAlert('Error: ' + (e?.message || e), 'error', 'Category Creation Failed')
   } finally {
     creatingCategory.value = false
   }
@@ -328,9 +404,9 @@ async function handleUpdateCategory() {
     }
 
     showCategoryModal.value = false
-    alert(`Category "${updated.name}" updated successfully!`)
+    await showAlert(`Category "${updated.name}" updated successfully!`, 'success', 'Category Updated')
   } catch (e: any) {
-    alert('Error updating category: ' + (e?.message || e))
+    await showAlert('Error updating category: ' + (e?.message || e), 'error', 'Update Failed')
   } finally {
     savingCategory.value = false
   }
@@ -690,8 +766,27 @@ function handleCategoryWheel(e: WheelEvent) {
     </footer>
 
     <!-- Category Modal (Create / Edit) -->
-    <div v-if="showCategoryModal" class="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
-      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md w-full shadow-2xl">
+    <Teleport to="body">
+      <Transition
+        enter-active-class="transition duration-200 ease-out"
+        enter-from-class="opacity-0"
+        enter-to-class="opacity-100"
+        leave-active-class="transition duration-150 ease-in"
+        leave-from-class="opacity-100"
+        leave-to-class="opacity-0"
+      >
+        <div v-if="showCategoryModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4" @click.self="showCategoryModal = false">
+          <Transition
+            enter-active-class="transition duration-200 ease-out"
+            enter-from-class="opacity-0 scale-95 translate-y-2"
+            enter-to-class="opacity-100 scale-100 translate-y-0"
+            leave-active-class="transition duration-150 ease-in"
+            leave-from-class="opacity-100 scale-100 translate-y-0"
+            leave-to-class="opacity-0 scale-95 translate-y-2"
+          >
+            <div v-if="showCategoryModal" class="relative bg-slate-900/95 border border-slate-700/80 rounded-2xl p-6 max-w-md w-full shadow-2xl shadow-black/90 overflow-hidden">
+              <!-- Top Glow Accent -->
+              <div class="absolute -top-14 left-1/2 -translate-x-1/2 w-48 h-32 bg-sky-500/15 rounded-full blur-3xl pointer-events-none"></div>
         <!-- Modal Tabs Header -->
         <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
           <div class="flex items-center gap-2">
@@ -861,11 +956,33 @@ function handleCategoryWheel(e: WheelEvent) {
           </form>
         </div>
       </div>
-    </div>
+          </Transition>
+        </div>
+      </Transition>
+    </Teleport>
 
     <!-- Statistics Modal -->
-    <div v-if="showStatsModal" class="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
-      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md w-full shadow-2xl">
+    <Teleport to="body">
+      <Transition
+        enter-active-class="transition duration-200 ease-out"
+        enter-from-class="opacity-0"
+        enter-to-class="opacity-100"
+        leave-active-class="transition duration-150 ease-in"
+        leave-from-class="opacity-100"
+        leave-to-class="opacity-0"
+      >
+        <div v-if="showStatsModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4" @click.self="showStatsModal = false">
+          <Transition
+            enter-active-class="transition duration-200 ease-out"
+            enter-from-class="opacity-0 scale-95 translate-y-2"
+            enter-to-class="opacity-100 scale-100 translate-y-0"
+            leave-active-class="transition duration-150 ease-in"
+            leave-from-class="opacity-100 scale-100 translate-y-0"
+            leave-to-class="opacity-0 scale-95 translate-y-2"
+          >
+            <div v-if="showStatsModal" class="relative bg-slate-900/95 border border-slate-700/80 rounded-2xl p-6 max-w-md w-full shadow-2xl shadow-black/90 overflow-hidden">
+              <!-- Top Glow Accent -->
+              <div class="absolute -top-14 left-1/2 -translate-x-1/2 w-48 h-32 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none"></div>
         <div class="flex items-center justify-between pb-3 border-b border-slate-800">
           <h3 class="text-base font-bold text-slate-100 flex items-center gap-2">
             <svg class="w-4 h-4 text-sky-400" fill="currentColor" viewBox="0 0 20 20">
@@ -916,12 +1033,28 @@ function handleCategoryWheel(e: WheelEvent) {
 
         <button 
           @click="showStatsModal = false"
-          class="w-full mt-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium"
+          class="w-full mt-5 py-2.5 bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/80 rounded-xl text-xs font-semibold transition active:scale-[0.98]"
         >
           Close
         </button>
       </div>
-    </div>
+          </Transition>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- Global Styled Popup / Dialog Modal -->
+    <ModalDialog
+      :show="dialog.show"
+      :title="dialog.title"
+      :message="dialog.message"
+      :type="dialog.type"
+      :confirm-text="dialog.confirmText"
+      :cancel-text="dialog.cancelText"
+      :danger="dialog.danger"
+      @confirm="onDialogConfirm"
+      @cancel="onDialogCancel"
+    />
   </div>
 </template>
 
