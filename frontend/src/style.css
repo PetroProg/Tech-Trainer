@@ -8,9 +8,9 @@ body {
 }
 
 pre[class*="language-"] {
-  background: #0f172a !important;
+  background: #0b1120 !important;
   border-radius: 0.75rem;
-  padding: 1rem;
+  padding: 1rem 1.25rem !important;
   margin: 0;
   border: 1px solid #334155;
 }
