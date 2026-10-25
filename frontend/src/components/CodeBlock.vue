@@ -102,7 +102,7 @@ const copyCode = async () => {
         <span v-else>Copy</span>
       </button>
     </div>
-    <div class="overflow-x-auto p-4 text-sm font-mono leading-relaxed">
+    <div class="overflow-x-auto p-4 pl-7 sm:pl-8 text-sm font-mono leading-relaxed">
       <pre class="!bg-transparent !p-0 !m-0"><code ref="codeEl" :class="`language-${normalizedLang}`">{{ cleanCode }}</code></pre>
     </div>
   </div>

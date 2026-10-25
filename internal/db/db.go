@@ -504,19 +504,52 @@ func (d *DB) SaveGeneratedQuestion(dto models.GeneratedQuestionDTO, categoryID i
 			strings.Contains(lowerQ, "error") ||
 			strings.Contains(lowerQ, "bug")
 
-		normCode := strings.Join(strings.Fields(dto.Code), " ")
+		// Check if 2 or more options appear in the code snippet
+		optMatchesCount := 0
 		for _, opt := range dto.Options {
-			normOpt := strings.Join(strings.Fields(opt), " ")
-			if normCode == normOpt || dto.Code == strings.TrimSpace(opt) {
-				dto.Code = ""
+			cleanOpt := strings.TrimSpace(opt)
+			if len(cleanOpt) > 3 && strings.Contains(dto.Code, cleanOpt) {
+				optMatchesCount++
+			}
+		}
+		if optMatchesCount >= 2 {
+			lines := strings.Split(dto.Code, "\n")
+			var keptLines []string
+			for _, l := range lines {
+				trimmedL := strings.TrimSpace(l)
+				isOptLine := false
+				for _, opt := range dto.Options {
+					cleanOpt := strings.TrimSpace(opt)
+					if trimmedL == cleanOpt || (len(cleanOpt) > 5 && strings.Contains(trimmedL, cleanOpt)) {
+						isOptLine = true
+						break
+					}
+				}
+				if !isOptLine {
+					keptLines = append(keptLines, l)
+				}
+			}
+			dto.Code = strings.TrimSpace(strings.Join(keptLines, "\n"))
+			if dto.Code == "" {
 				dto.Language = ""
-				break
 			}
 		}
 
-		if dto.Code != "" && isWhichCmd && !isAnalysis {
-			dto.Code = ""
-			dto.Language = ""
+		if len(dto.Code) > 0 {
+			normCode := strings.Join(strings.Fields(dto.Code), " ")
+			for _, opt := range dto.Options {
+				normOpt := strings.Join(strings.Fields(opt), " ")
+				if normCode == normOpt || dto.Code == strings.TrimSpace(opt) {
+					dto.Code = ""
+					dto.Language = ""
+					break
+				}
+			}
+
+			if dto.Code != "" && isWhichCmd && !isAnalysis {
+				dto.Code = ""
+				dto.Language = ""
+			}
 		}
 	}
 

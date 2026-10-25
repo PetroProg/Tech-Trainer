@@ -121,8 +121,10 @@ STRICT RULES & CONSTRAINTS:
      * In PHP, double quotes ("\n") MUST be used for newlines, never single quotes ('\n').
      * DO NOT prefix options with "Outputs: " or "Output: ".
 7. Anti-Spoiler & Code Snippet Rule:
-   - When the question asks "Which command...", "Which PowerShell command...", "Which snippet...", or "Which of the following...", the candidate choices belong strictly in the options array!
-   - Under NO circumstances put the answer command or any option in the code field. For such questions, the code field MUST be empty "" (and language MUST be "").
+   - When the question asks "Which command...", "Which PowerShell command...", "Which snippet...", "Which line of code...", or "Which of the following...", the candidate choices belong strictly in the options array!
+   - Under NO circumstances put the answer command, candidate choices, or all 4 options in the code field.
+   - For command questions, the code field MUST be empty "" (and language MUST be "").
+   - For "Which line..." questions, the code field should only contain setup/context (e.g. string = 'hello'), NEVER dump the 4 options into the code snippet!
    - The code field is ONLY for code that the learner is asked to inspect/analyze (e.g. "What is the output of this code snippet?", "Find the bug in this function:").
 8. Domain Truth & Anti-Hallucination:
    - Cisco / Networking:
@@ -308,24 +310,58 @@ STRICT JSON OUTPUT FORMAT (NO EXTRA KEYS):
 			strings.Contains(lowerQ, "error") ||
 			strings.Contains(lowerQ, "bug")
 
-		shouldClearSnippet := false
-		normCode := strings.Join(strings.Fields(dto.Code), " ")
+		// Check if 2 or more options appear in the code snippet (e.g. model dumped all options in code)
+		optMatchesCount := 0
 		for _, opt := range dto.Options {
-			normOpt := strings.Join(strings.Fields(opt), " ")
-			if normCode == normOpt || dto.Code == opt {
-				shouldClearSnippet = true
-				break
+			cleanOpt := strings.TrimSpace(opt)
+			if len(cleanOpt) > 3 && strings.Contains(dto.Code, cleanOpt) {
+				optMatchesCount++
+			}
+		}
+		if optMatchesCount >= 2 {
+			lines := strings.Split(dto.Code, "\n")
+			var keptLines []string
+			for _, l := range lines {
+				trimmedL := strings.TrimSpace(l)
+				isOptLine := false
+				for _, opt := range dto.Options {
+					cleanOpt := strings.TrimSpace(opt)
+					if trimmedL == cleanOpt || (len(cleanOpt) > 5 && strings.Contains(trimmedL, cleanOpt)) {
+						isOptLine = true
+						break
+					}
+				}
+				if !isOptLine {
+					keptLines = append(keptLines, l)
+				}
+			}
+			dto.Code = strings.TrimSpace(strings.Join(keptLines, "\n"))
+			if dto.Code == "" {
+				dto.Language = ""
+				dto.Type = "multiple_choice"
 			}
 		}
 
-		if !shouldClearSnippet && isWhichCmd && !isAnalysisQuestion {
-			shouldClearSnippet = true
-		}
+		if len(dto.Code) > 0 {
+			shouldClearSnippet := false
+			normCode := strings.Join(strings.Fields(dto.Code), " ")
+			for _, opt := range dto.Options {
+				normOpt := strings.Join(strings.Fields(opt), " ")
+				if normCode == normOpt || dto.Code == opt {
+					shouldClearSnippet = true
+					break
+				}
+			}
 
-		if shouldClearSnippet {
-			dto.Code = ""
-			dto.Language = ""
-			dto.Type = "multiple_choice"
+			if !shouldClearSnippet && isWhichCmd && !isAnalysisQuestion {
+				shouldClearSnippet = true
+			}
+
+			if shouldClearSnippet {
+				dto.Code = ""
+				dto.Language = ""
+				dto.Type = "multiple_choice"
+			}
 		}
 	}
 
