@@ -664,10 +664,10 @@ function handleCategoryWheel(e: WheelEvent) {
       <!-- Active Quiz Card -->
       <div v-else class="bg-slate-900/90 border border-slate-800/90 rounded-2xl p-5 shadow-2xl backdrop-blur-sm">
         <!-- Metadata Row -->
-        <div class="flex items-center justify-between mb-3 text-[11px]">
-          <div class="flex items-center gap-2">
-            <span class="px-2.5 py-0.5 rounded-full font-semibold bg-sky-950 text-sky-400 border border-sky-800/50 flex items-center gap-1.5">
-              <span>{{ currentQuestion.category_name }}</span>
+        <div class="flex items-center justify-between gap-2 mb-3.5 text-[11px]">
+          <div class="flex items-center gap-1.5 sm:gap-2 flex-wrap min-w-0">
+            <span class="px-2.5 py-0.5 rounded-full font-semibold bg-sky-950 text-sky-400 border border-sky-800/50 flex items-center gap-1.5 shrink-0">
+              <span class="truncate max-w-[150px] sm:max-w-none">{{ currentQuestion.category_name }}</span>
               <button 
                 @click="openEditCategoryForCurrentQuestion" 
                 class="hover:text-sky-200 transition p-0.5" 
@@ -679,20 +679,24 @@ function handleCategoryWheel(e: WheelEvent) {
               </button>
             </span>
             <span 
-              class="px-2 py-0.5 rounded-full uppercase tracking-wider font-bold"
+              class="px-2 py-0.5 rounded-full uppercase tracking-wider font-bold shrink-0"
               :class="currentQuestion.difficulty === 'middle' ? 'bg-amber-950/60 text-amber-300 border border-amber-800/50' : 'bg-emerald-950/60 text-emerald-300 border border-emerald-800/50'"
             >
               {{ currentQuestion.difficulty }}
             </span>
-            <span v-if="currentQuestion.is_solved" class="px-2 py-0.5 rounded-full text-slate-400 bg-slate-800 border border-slate-700 text-[10px]">
+            <span v-if="currentQuestion.is_solved" class="px-2 py-0.5 rounded-full text-slate-400 bg-slate-800 border border-slate-700 text-[10px] shrink-0">
               Review Mode
             </span>
           </div>
 
-          <span class="text-slate-400 font-medium">
-            <span v-if="currentQuestion.expected_correct_count === 1">Single Choice (Select 1)</span>
-            <span v-else-if="currentQuestion.expected_correct_count && currentQuestion.expected_correct_count > 1">Multiple Choice (Choose {{ currentQuestion.expected_correct_count }})</span>
-            <span v-else>1 - 4 Correct Answers</span>
+          <span class="text-slate-400 font-medium text-right shrink-0 whitespace-nowrap bg-slate-800/60 border border-slate-700/60 px-2.5 py-0.5 rounded-full text-[11px]">
+            <span v-if="currentQuestion.expected_correct_count === 1">
+              <span class="hidden sm:inline">Single Choice </span>(Select 1)
+            </span>
+            <span v-else-if="currentQuestion.expected_correct_count && currentQuestion.expected_correct_count > 1">
+              <span class="hidden sm:inline">Multiple Choice </span>(Choose {{ currentQuestion.expected_correct_count }})
+            </span>
+            <span v-else>1 - 4 Correct</span>
           </span>
         </div>
 
