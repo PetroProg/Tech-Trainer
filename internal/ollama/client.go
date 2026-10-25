@@ -284,6 +284,28 @@ STRICT JSON OUTPUT FORMAT (NO EXTRA KEYS):
 		}
 	}
 
+	// 5b. Explanation / Correct Index consistency check
+	lowerExpl := strings.ToLower(dto.Explanation)
+	for i, opt := range dto.Options {
+		if !correctSet[i] {
+			cleanOpt := strings.TrimSpace(opt)
+			if len(cleanOpt) > 0 {
+				patterns := []string{
+					"correct output is " + strings.ToLower(cleanOpt),
+					"correct answer is " + strings.ToLower(cleanOpt),
+					"correct result is " + strings.ToLower(cleanOpt),
+					"therefore, the correct output is " + strings.ToLower(cleanOpt),
+					"therefore, " + strings.ToLower(cleanOpt) + " is the correct",
+				}
+				for _, pat := range patterns {
+					if strings.Contains(lowerExpl, pat) {
+						return nil, fmt.Errorf("explanation inconsistency: explanation states %q is correct, but index %d is not in correct_indices", cleanOpt, i)
+					}
+				}
+			}
+		}
+	}
+
 	// 6. Anti-spoiler guard: ensure code snippet does not duplicate or leak options
 	cleanCode := strings.TrimSpace(dto.Code)
 	if strings.HasPrefix(cleanCode, "```") {
