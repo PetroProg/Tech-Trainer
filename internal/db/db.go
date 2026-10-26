@@ -452,6 +452,185 @@ func (d *DB) GetRandomQuestion(categorySlug, difficulty string) (*models.Questio
 	return &q, nil
 }
 
+
+// GetPrefetchQuestions retrieves a batch of questions matching filters with options and validation metadata.
+func (d *DB) GetPrefetchQuestions(categorySlug, difficulty string, count int, excludeIDs []int64) ([]models.OfflineQuestion, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if count <= 0 || count > 20 {
+		count = 5
+	}
+
+	whereClauses := []string{
+		"c.is_active = 1",
+		"q.id NOT IN (SELECT question_id FROM user_answers WHERE question_id IS NOT NULL)",
+	}
+	args := []interface{}{}
+
+	if len(excludeIDs) > 0 {
+		placeholders := make([]string, len(excludeIDs))
+		for i, id := range excludeIDs {
+			placeholders[i] = "?"
+			args = append(args, id)
+		}
+		whereClauses = append(whereClauses, fmt.Sprintf("q.id NOT IN (%s)", strings.Join(placeholders, ",")))
+	}
+
+	if categorySlug != "" && categorySlug != "all" {
+		whereClauses = append(whereClauses, "c.slug = ?")
+		args = append(args, categorySlug)
+	}
+
+	if difficulty != "" && difficulty != "all" {
+		whereClauses = append(whereClauses, "q.difficulty = ?")
+		args = append(args, difficulty)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT q.id, q.category_id, c.slug, c.name, q.type, q.difficulty,
+		       q.question_text, q.code_snippet, q.language, q.explanation, q.created_at
+		FROM questions q
+		JOIN categories c ON q.category_id = c.id
+		WHERE %s
+		ORDER BY RANDOM()
+		LIMIT %d
+	`, strings.Join(whereClauses, " AND "), count)
+
+	rows, err := d.conn.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	questions := make([]models.OfflineQuestion, 0)
+	var qIDs []int64
+
+	for rows.Next() {
+		var oq models.OfflineQuestion
+		var createdAt string
+		err := rows.Scan(
+			&oq.ID, &oq.CategoryID, &oq.CategorySlug, &oq.CategoryName,
+			&oq.Type, &oq.Difficulty, &oq.QuestionText, &oq.CodeSnippet,
+			&oq.Language, &oq.Explanation, &createdAt,
+		)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		oq.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+		oq.Options = make([]models.Option, 0)
+		oq.CorrectOptionIDs = make([]int64, 0)
+		oq.IsSolved = false
+		questions = append(questions, oq)
+		qIDs = append(qIDs, oq.ID)
+	}
+	rows.Close()
+
+	// If fewer questions found than requested, fall back to review (including solved questions)
+	if len(questions) < count {
+		needed := count - len(questions)
+		fallbackWhere := []string{"c.is_active = 1"}
+		fallbackArgs := []interface{}{}
+
+		allExclude := append([]int64{}, qIDs...)
+		allExclude = append(allExclude, excludeIDs...)
+		if len(allExclude) > 0 {
+			placeholders := make([]string, len(allExclude))
+			for i, id := range allExclude {
+				placeholders[i] = "?"
+				fallbackArgs = append(fallbackArgs, id)
+			}
+			fallbackWhere = append(fallbackWhere, fmt.Sprintf("q.id NOT IN (%s)", strings.Join(placeholders, ",")))
+		}
+
+		if categorySlug != "" && categorySlug != "all" {
+			fallbackWhere = append(fallbackWhere, "c.slug = ?")
+			fallbackArgs = append(fallbackArgs, categorySlug)
+		}
+
+		if difficulty != "" && difficulty != "all" {
+			fallbackWhere = append(fallbackWhere, "q.difficulty = ?")
+			fallbackArgs = append(fallbackArgs, difficulty)
+		}
+
+		fbQuery := fmt.Sprintf(`
+			SELECT q.id, q.category_id, c.slug, c.name, q.type, q.difficulty,
+			       q.question_text, q.code_snippet, q.language, q.explanation, q.created_at
+			FROM questions q
+			JOIN categories c ON q.category_id = c.id
+			WHERE %s
+			ORDER BY RANDOM()
+			LIMIT %d
+		`, strings.Join(fallbackWhere, " AND "), needed)
+
+		fbRows, fbErr := d.conn.Query(fbQuery, fallbackArgs...)
+		if fbErr == nil {
+			for fbRows.Next() {
+				var oq models.OfflineQuestion
+				var createdAt string
+				if err := fbRows.Scan(
+					&oq.ID, &oq.CategoryID, &oq.CategorySlug, &oq.CategoryName,
+					&oq.Type, &oq.Difficulty, &oq.QuestionText, &oq.CodeSnippet,
+					&oq.Language, &oq.Explanation, &createdAt,
+				); err == nil {
+					oq.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+					oq.Options = make([]models.Option, 0)
+					oq.CorrectOptionIDs = make([]int64, 0)
+					oq.IsSolved = true
+					questions = append(questions, oq)
+					qIDs = append(qIDs, oq.ID)
+				}
+			}
+			fbRows.Close()
+		}
+	}
+
+	if len(questions) == 0 {
+		return questions, nil
+	}
+
+	qMap := make(map[int64]*models.OfflineQuestion)
+	for i := range questions {
+		qMap[questions[i].ID] = &questions[i]
+	}
+
+	// Fetch options for all selected questions
+	optPlaceholders := make([]string, len(qIDs))
+	optArgs := make([]interface{}, len(qIDs))
+	for i, id := range qIDs {
+		optPlaceholders[i] = "?"
+		optArgs[i] = id
+	}
+
+	optQuery := fmt.Sprintf(`
+		SELECT id, question_id, option_text, is_correct, order_idx
+		FROM options
+		WHERE question_id IN (%s)
+		ORDER BY question_id ASC, order_idx ASC
+	`, strings.Join(optPlaceholders, ","))
+
+	optRows, err := d.conn.Query(optQuery, optArgs...)
+	if err == nil {
+		for optRows.Next() {
+			var o models.Option
+			var isCorrectInt int
+			if err := optRows.Scan(&o.ID, &o.QuestionID, &o.OptionText, &isCorrectInt, &o.OrderIndex); err == nil {
+				o.IsCorrect = isCorrectInt == 1
+				if q, ok := qMap[o.QuestionID]; ok {
+					q.Options = append(q.Options, o)
+					if o.IsCorrect {
+						q.CorrectOptionIDs = append(q.CorrectOptionIDs, o.ID)
+						q.ExpectedCorrectCount++
+					}
+				}
+			}
+		}
+		optRows.Close()
+	}
+
+	return questions, nil
+}
+
 // CalculateHash creates a SHA-256 digest of normalized question text and code snippet.
 func CalculateHash(questionText, codeSnippet string) string {
 	normalQuestion := strings.ToLower(strings.TrimSpace(questionText))

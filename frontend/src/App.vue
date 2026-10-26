@@ -7,6 +7,7 @@ import {
   createCategory,
   updateCategory,
   getRandomQuestion,
+  prefetchQuestions,
   submitAnswer,
   deleteQuestion,
   getUserStats,
@@ -25,6 +26,10 @@ import { getPendingAnswersCount, resetOfflineStats } from './offline'
 
 // Application State
 const categories = ref<Category[]>([])
+const questionQueue = ref<Question[]>([])
+const isBuffering = ref(false)
+let lastBufferCategory = 'all'
+let lastBufferDifficulty = 'all'
 const selectedCategory = ref<string>('all')
 const selectedDifficulty = ref<string>('all')
 const currentQuestion = ref<Question | null>(null)
@@ -161,6 +166,13 @@ onMounted(async () => {
   setInterval(() => {
     if (isOnline.value) loadWorkerStatus()
   }, 20000)
+
+  // Periodic background sync if pending items exist
+  setInterval(() => {
+    if (isOnline.value && pendingCount.value > 0) {
+      handleSync()
+    }
+  }, 15000)
 })
 
 async function refreshPendingCount() {
@@ -220,14 +232,70 @@ async function loadWorkerStatus() {
   }
 }
 
-async function nextQuestion() {
-  loading.value = true
-  errorMessage.value = ''
+async function ensureQuestionBuffer() {
+  if (isBuffering.value) return
+  if (questionQueue.value.length >= 4) return
+
+  isBuffering.value = true
+  try {
+    const needed = 5 - questionQueue.value.length
+    const excludeIds: number[] = []
+    if (currentQuestion.value) excludeIds.push(currentQuestion.value.id)
+    for (const q of questionQueue.value) {
+      excludeIds.push(q.id)
+    }
+
+    const prefetched = await prefetchQuestions(
+      selectedCategory.value,
+      selectedDifficulty.value,
+      needed,
+      excludeIds
+    )
+
+    if (prefetched && prefetched.length > 0) {
+      const existingIds = new Set([
+        currentQuestion.value?.id,
+        ...questionQueue.value.map(q => q.id)
+      ])
+      for (const q of prefetched) {
+        if (!existingIds.has(q.id)) {
+          questionQueue.value.push(q)
+          existingIds.add(q.id)
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Buffer refill error:', e)
+  } finally {
+    isBuffering.value = false
+  }
+}
+
+async function nextQuestion(forceRefresh: boolean = false) {
   answerResult.value = null
   selectedOptionIds.value = []
 
+  // If filter changed or forced, invalidate current queue
+  if (forceRefresh || lastBufferCategory !== selectedCategory.value || lastBufferDifficulty !== selectedDifficulty.value) {
+    questionQueue.value = []
+    lastBufferCategory = selectedCategory.value
+    lastBufferDifficulty = selectedDifficulty.value
+  }
+
+  // Instant display from preloaded buffer (0ms transition!)
+  if (questionQueue.value.length > 0) {
+    currentQuestion.value = questionQueue.value.shift()!
+    ensureQuestionBuffer().catch(() => {})
+    return
+  }
+
+  // Buffer is empty (initial startup or category switch)
+  loading.value = true
+  errorMessage.value = ''
+
   try {
     currentQuestion.value = await getRandomQuestion(selectedCategory.value, selectedDifficulty.value)
+    ensureQuestionBuffer().catch(() => {})
   } catch (e: any) {
     currentQuestion.value = null
     errorMessage.value = e.message || 'No questions available'
@@ -251,7 +319,12 @@ async function handleAnswer() {
   submitting.value = true
 
   try {
-    const res = await submitAnswer(currentQuestion.value.id, selectedOptionIds.value)
+    // Pass currentQuestion.value for instant 0ms local validation!
+    const res = await submitAnswer(
+      currentQuestion.value.id, 
+      selectedOptionIds.value, 
+      currentQuestion.value
+    )
     answerResult.value = res
 
     // 1. Live update category counters immediately (instant 0ms response)
@@ -274,11 +347,11 @@ async function handleAnswer() {
 
       if (stats.value.by_category) {
         const catSlug = currentQuestion.value.category_slug
-        const catStat = stats.value.by_category.find(cs => cs.slug === catSlug)
+        const catStat = stats.value.by_category.find(cs => (cs.category_slug === catSlug || (cs as any).slug === catSlug))
         if (catStat) {
-          catStat.answered++
-          if (res.is_correct) catStat.correct++
-          catStat.accuracy = Math.round((catStat.correct / catStat.answered) * 100)
+          catStat.total_answered++
+          if (res.is_correct) catStat.total_correct++
+          catStat.accuracy_percent = Math.round((catStat.total_correct / catStat.total_answered) * 100)
         }
       }
     }

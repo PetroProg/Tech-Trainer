@@ -206,6 +206,36 @@ func (a *API) GetRandomQuestion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, q)
 }
 
+
+// GetPrefetchQuestions returns a batch of questions for offline buffering.
+func (a *API) GetPrefetchQuestions(w http.ResponseWriter, r *http.Request) {
+	categorySlug := r.URL.Query().Get("category")
+	difficulty := r.URL.Query().Get("difficulty")
+	countStr := r.URL.Query().Get("count")
+	count := 5
+	if c, err := strconv.Atoi(countStr); err == nil && c > 0 && c <= 20 {
+		count = c
+	}
+
+	excludeStr := r.URL.Query().Get("exclude")
+	var excludeIDs []int64
+	if excludeStr != "" {
+		for _, part := range strings.Split(excludeStr, ",") {
+			if id, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64); err == nil {
+				excludeIDs = append(excludeIDs, id)
+			}
+		}
+	}
+
+	questions, err := a.database.GetPrefetchQuestions(categorySlug, difficulty, count, excludeIDs)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, questions)
+}
+
 // SubmitAnswer validates the user's selected options and returns scoring.
 func (a *API) SubmitAnswer(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")

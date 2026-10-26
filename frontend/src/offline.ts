@@ -59,7 +59,6 @@ export async function saveOfflinePack(pack: OfflinePack): Promise<void> {
     const qStore = tx.objectStore('questions')
     const metaStore = tx.objectStore('meta')
 
-    // Preserve local solved state if questions were answered offline
     const getAllReq = qStore.getAll()
     getAllReq.onsuccess = () => {
       const existingQuestions: OfflineQuestion[] = getAllReq.result || []
@@ -80,6 +79,29 @@ export async function saveOfflinePack(pack: OfflinePack): Promise<void> {
       }
 
       metaStore.put({ key: 'last_sync', timestamp: new Date().toISOString() })
+    }
+
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
+// cacheQuestions stores/updates preloaded questions in IndexedDB
+export async function cacheQuestions(questions: (Question | OfflineQuestion)[]): Promise<void> {
+  if (!questions || questions.length === 0) return
+  const db = await initOfflineDB()
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(['questions'], 'readwrite')
+    const qStore = tx.objectStore('questions')
+
+    for (const q of questions) {
+      const offlineQ: OfflineQuestion = {
+        ...q,
+        correct_option_ids: (q as OfflineQuestion).correct_option_ids || 
+          q.options?.filter(o => o.is_correct).map(o => o.id) || []
+      }
+      qStore.put(offlineQ)
     }
 
     tx.oncomplete = () => resolve()
@@ -114,7 +136,6 @@ export async function getOfflineCategories(): Promise<Category[]> {
       const categories: Category[] = catReq.result || []
       const questions: OfflineQuestion[] = qReq.result || []
 
-      // Recalculate counters based on local state
       const countMap: Record<number, { total: number; solved: number }> = {}
       for (const q of questions) {
         if (!countMap[q.category_id]) {
@@ -138,8 +159,13 @@ export async function getOfflineCategories(): Promise<Category[]> {
   })
 }
 
-// getOfflineQuestion selects a random challenge from IndexedDB
-export async function getOfflineQuestion(categorySlug?: string, difficulty?: string): Promise<Question | null> {
+// getOfflineQuestions retrieves a batch of questions from IndexedDB for prefetching
+export async function getOfflineQuestions(
+  categorySlug?: string,
+  difficulty?: string,
+  count = 5,
+  excludeIds: number[] = []
+): Promise<OfflineQuestion[]> {
   const db = await initOfflineDB()
 
   return new Promise((resolve, reject) => {
@@ -150,12 +176,13 @@ export async function getOfflineQuestion(categorySlug?: string, difficulty?: str
     req.onsuccess = () => {
       const all: OfflineQuestion[] = req.result || []
       if (all.length === 0) {
-        resolve(null)
+        resolve([])
         return
       }
 
-      // Filter by category and difficulty
-      let filtered = all
+      const excludeSet = new Set(excludeIds)
+
+      let filtered = all.filter(q => !excludeSet.has(q.id))
       if (categorySlug && categorySlug !== 'all') {
         filtered = filtered.filter(q => q.category_slug === categorySlug)
       }
@@ -164,46 +191,94 @@ export async function getOfflineQuestion(categorySlug?: string, difficulty?: str
       }
 
       if (filtered.length === 0) {
-        resolve(null)
+        filtered = all
+        if (categorySlug && categorySlug !== 'all') {
+          filtered = filtered.filter(q => q.category_slug === categorySlug)
+        }
+        if (difficulty && difficulty !== 'all') {
+          filtered = filtered.filter(q => q.difficulty === difficulty)
+        }
+      }
+
+      if (filtered.length === 0) {
+        resolve([])
         return
       }
 
-      // Prioritize unsolved questions
       const unsolved = filtered.filter(q => !q.is_solved)
-      const pool = unsolved.length > 0 ? unsolved : filtered
-      const chosen = pool[Math.floor(Math.random() * pool.length)]
+      const solved = filtered.filter(q => q.is_solved)
 
-      // Sanitize options before returning to UI
-      const sanitizedOptions = chosen.options.map(opt => ({
-        id: opt.id,
-        option_text: opt.option_text,
-        order_idx: opt.order_idx,
-        is_correct: false
-      }))
+      const shuffle = <T>(arr: T[]): T[] => {
+        const copy = [...arr]
+        for (let i = copy.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [copy[i], copy[j]] = [copy[j], copy[i]]
+        }
+        return copy
+      }
 
-      resolve({
-        id: chosen.id,
-        category_id: chosen.category_id,
-        category_slug: chosen.category_slug,
-        category_name: chosen.category_name,
-        type: chosen.type,
-        difficulty: chosen.difficulty,
-        question_text: chosen.question_text,
-        code_snippet: chosen.code_snippet,
-        language: chosen.language,
-        explanation: chosen.explanation,
-        options: sanitizedOptions,
-        expected_correct_count: chosen.correct_option_ids?.length || 1,
-        is_solved: chosen.is_solved
+      const shuffledUnsolved = shuffle(unsolved)
+      const shuffledSolved = shuffle(solved)
+
+      const selected = [...shuffledUnsolved, ...shuffledSolved].slice(0, count)
+
+      const result: OfflineQuestion[] = selected.map(chosen => {
+        const sanitizedOptions = chosen.options.map(opt => ({
+          id: opt.id,
+          option_text: opt.option_text,
+          order_idx: opt.order_idx,
+          is_correct: false
+        }))
+
+        return {
+          id: chosen.id,
+          category_id: chosen.category_id,
+          category_slug: chosen.category_slug,
+          category_name: chosen.category_name,
+          type: chosen.type,
+          difficulty: chosen.difficulty,
+          question_text: chosen.question_text,
+          code_snippet: chosen.code_snippet,
+          language: chosen.language,
+          explanation: chosen.explanation,
+          options: sanitizedOptions,
+          correct_option_ids: chosen.correct_option_ids || chosen.options?.filter(o => o.is_correct).map(o => o.id) || [],
+          expected_correct_count: chosen.correct_option_ids?.length || chosen.expected_correct_count || 1,
+          is_solved: chosen.is_solved
+        }
       })
+
+      resolve(result)
     }
 
     req.onerror = () => reject(req.error)
   })
 }
 
+// getOfflineQuestion selects a single random challenge from IndexedDB
+export async function getOfflineQuestion(categorySlug?: string, difficulty?: string): Promise<Question | null> {
+  const questions = await getOfflineQuestions(categorySlug, difficulty, 1)
+  return questions.length > 0 ? questions[0] : null
+}
+
+// getOfflineQuestionById retrieves a specific question with validation data
+export async function getOfflineQuestionById(questionId: number): Promise<OfflineQuestion | null> {
+  const db = await initOfflineDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(['questions'], 'readonly')
+    const qStore = tx.objectStore('questions')
+    const req = qStore.get(questionId)
+    req.onsuccess = () => resolve(req.result || null)
+    req.onerror = () => reject(req.error)
+  })
+}
+
 // submitOfflineAnswer evaluates choices locally and enqueues the result for background sync
-export async function submitOfflineAnswer(questionId: number, selectedOptionIds: number[]): Promise<SubmitAnswerResponse> {
+export async function submitOfflineAnswer(
+  questionId: number, 
+  selectedOptionIds: number[],
+  fallbackQuestion?: OfflineQuestion
+): Promise<SubmitAnswerResponse> {
   const db = await initOfflineDB()
 
   return new Promise((resolve, reject) => {
@@ -215,18 +290,30 @@ export async function submitOfflineAnswer(questionId: number, selectedOptionIds:
     const qReq = qStore.get(questionId)
     const statsReq = metaStore.get('stats')
 
-    tx.oncomplete = () => {
-      const q: OfflineQuestion = qReq.result
+    let responseData: SubmitAnswerResponse | null = null
+    let qDone = false
+    let statsDone = false
+
+    const checkAndProcess = () => {
+      if (!qDone || !statsDone) return
+
+      let q: OfflineQuestion = qReq.result || fallbackQuestion
       if (!q) {
         reject(new Error('Question not found in offline database'))
         return
       }
 
-      const correctSet = new Set(q.correct_option_ids)
-      const isCorrect = selectedOptionIds.length === q.correct_option_ids.length &&
-        selectedOptionIds.every(id => correctSet.has(id))
+      if (!qReq.result && fallbackQuestion) {
+        qStore.put(fallbackQuestion)
+      }
 
-      // Load or initialize stats
+      const correctOptionIds = q.correct_option_ids || q.options?.filter(o => o.is_correct).map(o => o.id) || []
+      const correctSet = new Set(correctOptionIds)
+      const isCorrect = (
+        selectedOptionIds.length === correctOptionIds.length &&
+        selectedOptionIds.every(id => correctSet.has(id))
+      )
+
       let stats: LocalStatsMeta = statsReq.result || {
         key: 'stats',
         total_answered: 0,
@@ -245,20 +332,18 @@ export async function submitOfflineAnswer(questionId: number, selectedOptionIds:
         stats.current_streak = 0
       }
 
-      if (!stats.by_category[q.category_slug]) {
-        stats.by_category[q.category_slug] = { answered: 0, correct: 0 }
+      const catSlug = q.category_slug || 'unknown'
+      if (!stats.by_category[catSlug]) {
+        stats.by_category[catSlug] = { answered: 0, correct: 0 }
       }
-      stats.by_category[q.category_slug].answered++
-      if (isCorrect) stats.by_category[q.category_slug].correct++
+      stats.by_category[catSlug].answered++
+      if (isCorrect) stats.by_category[catSlug].correct++
 
-      // Save updated stats
       metaStore.put(stats)
 
-      // Mark question as solved in offline storage
       q.is_solved = true
       qStore.put(q)
 
-      // Record in pending queue for server synchronization
       const answerItem: SyncAnswerItem = {
         question_id: questionId,
         selected_option_ids: selectedOptionIds,
@@ -266,17 +351,38 @@ export async function submitOfflineAnswer(questionId: number, selectedOptionIds:
       }
       pendingStore.add(answerItem)
 
-      resolve({
+      responseData = {
         is_correct: isCorrect,
         explanation: q.explanation,
-        correct_option_ids: q.correct_option_ids,
+        correct_option_ids: correctOptionIds,
         selected_option_ids: selectedOptionIds,
         streak: stats.current_streak,
-        total_score: stats.total_score
-      })
+        total_score: stats.total_score,
+        is_offline: true
+      }
     }
 
+    qReq.onsuccess = () => {
+      qDone = true
+      checkAndProcess()
+    }
+    qReq.onerror = () => reject(qReq.error)
+
+    statsReq.onsuccess = () => {
+      statsDone = true
+      checkAndProcess()
+    }
+    statsReq.onerror = () => reject(statsReq.error)
+
+    tx.oncomplete = () => {
+      if (responseData) {
+        resolve(responseData)
+      } else {
+        reject(new Error('Transaction completed without generating answer result'))
+      }
+    }
     tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error || new Error('Transaction aborted'))
   })
 }
 

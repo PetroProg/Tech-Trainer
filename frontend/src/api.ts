@@ -3,6 +3,9 @@ import {
   saveOfflineCategory,
   getOfflineCategories,
   getOfflineQuestion,
+  getOfflineQuestions,
+  getOfflineQuestionById,
+  cacheQuestions,
   submitOfflineAnswer,
   getPendingAnswers,
   clearPendingAnswers,
@@ -104,7 +107,7 @@ export interface WorkerStatus {
 
 const API_BASE = '/api';
 
-// Helper with timeout to gracefully detect Tailscale disconnect
+// Helper with timeout to gracefully detect disconnects
 async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 3000): Promise<Response> {
   const controller = new AbortController()
   const id = setTimeout(() => controller.abort(), timeoutMs)
@@ -116,10 +119,10 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
   }
 }
 
-// Download fresh offline pack in background
+// Download fresh offline pack in background with generous timeout for mobile
 export async function downloadAndCacheOfflinePack(): Promise<boolean> {
   try {
-    const res = await fetchWithTimeout(`${API_BASE}/questions/offline-pack`, {}, 5000)
+    const res = await fetchWithTimeout(`${API_BASE}/questions/offline-pack`, {}, 15000)
     if (!res.ok) return false
     const pack: OfflinePack = await res.json()
     await saveOfflinePack(pack)
@@ -139,7 +142,7 @@ export async function syncOfflineAnswersToServer(): Promise<SyncAnswersResponse 
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ answers: pending })
-    }, 6000)
+    }, 8000)
 
     if (!res.ok) return null
     const result: SyncAnswersResponse = await res.json()
@@ -197,18 +200,41 @@ export async function updateCategory(id: number, data: { name: string; descripti
   return updated;
 }
 
-export async function getRandomQuestion(categorySlug?: string, difficulty?: string): Promise<Question> {
+// Prefetch a batch of questions from server (or fallback to local IndexedDB)
+export async function prefetchQuestions(
+  categorySlug?: string,
+  difficulty?: string,
+  count = 5,
+  excludeIds: number[] = []
+): Promise<Question[]> {
   try {
-    const params = new URLSearchParams();
-    if (categorySlug && categorySlug !== 'all') params.append('category', categorySlug);
-    if (difficulty && difficulty !== 'all') params.append('difficulty', difficulty);
+    const params = new URLSearchParams()
+    if (categorySlug && categorySlug !== 'all') params.append('category', categorySlug)
+    if (difficulty && difficulty !== 'all') params.append('difficulty', difficulty)
+    params.append('count', String(count))
+    if (excludeIds.length > 0) params.append('exclude', excludeIds.join(','))
 
-    const res = await fetchWithTimeout(`${API_BASE}/questions/random?${params.toString()}`, {}, 2500);
+    const res = await fetchWithTimeout(`${API_BASE}/questions/prefetch?${params.toString()}`, {}, 2500)
     if (res.ok) {
-      return await res.json();
+      const serverQuestions: OfflineQuestion[] = await res.json()
+      if (serverQuestions && serverQuestions.length > 0) {
+        cacheQuestions(serverQuestions).catch(() => {})
+        return serverQuestions
+      }
     }
   } catch {
-    // Offline / Tailscale disconnected
+    // Fallback to local storage
+  }
+
+  // Fallback to IndexedDB
+  const offlineList = await getOfflineQuestions(categorySlug, difficulty, count, excludeIds)
+  return offlineList
+}
+
+export async function getRandomQuestion(categorySlug?: string, difficulty?: string): Promise<Question> {
+  const questions = await prefetchQuestions(categorySlug, difficulty, 1)
+  if (questions.length > 0) {
+    return questions[0]
   }
 
   const offlineQ = await getOfflineQuestion(categorySlug, difficulty)
@@ -216,27 +242,50 @@ export async function getRandomQuestion(categorySlug?: string, difficulty?: stri
     return offlineQ
   }
 
-  throw new Error('No questions available in cache. Reconnect to Tailscale once to pre-load questions.')
+  throw new Error('No questions available in cache. Reconnect to sync questions.')
 }
 
-export async function submitAnswer(questionId: number, selectedOptionIds: number[]): Promise<SubmitAnswerResponse> {
+// Local-first instant submission with background server sync
+export async function submitAnswer(
+  questionId: number, 
+  selectedOptionIds: number[],
+  currentQuestionData?: Question | OfflineQuestion
+): Promise<SubmitAnswerResponse> {
+  // 1. FAST LOCAL EVALUATION: If we have the question validation data in memory or IndexedDB
+  const offlineQ = (currentQuestionData as OfflineQuestion)?.correct_option_ids?.length 
+    ? (currentQuestionData as OfflineQuestion) 
+    : await getOfflineQuestionById(questionId)
+
+  if (offlineQ && offlineQ.correct_option_ids && offlineQ.correct_option_ids.length > 0) {
+    // Instant 0ms local validation!
+    const result = await submitOfflineAnswer(questionId, selectedOptionIds, offlineQ)
+    // Synchronize to server in the background (fire-and-forget)
+    syncOfflineAnswersToServer().catch(() => {})
+    return result
+  }
+
+  // 2. If question lacks local validation data, try server with short timeout
   try {
     const res = await fetchWithTimeout(`${API_BASE}/questions/${questionId}/answer`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ selected_option_ids: selectedOptionIds })
-    }, 3000);
+    }, 2500)
 
     if (res.ok) {
       const data = await res.json()
       return { ...data, is_offline: false }
     }
   } catch {
-    // Network / Tailscale down
+    // Network unreachable
   }
 
-  // Autonomous offline submission with local evaluation and sync queueing
-  const offlineResult = await submitOfflineAnswer(questionId, selectedOptionIds)
+  // 3. Fallback to offline evaluation with whatever record exists
+  const offlineResult = await submitOfflineAnswer(
+    questionId, 
+    selectedOptionIds, 
+    currentQuestionData as OfflineQuestion
+  )
   return { ...offlineResult, is_offline: true }
 }
 

@@ -64,6 +64,7 @@ func main() {
 		r.Post("/categories", apiHandler.CreateCategory)
 		r.Put("/categories/{id}", apiHandler.UpdateCategory)
 		r.Get("/questions/random", apiHandler.GetRandomQuestion)
+		r.Get("/questions/prefetch", apiHandler.GetPrefetchQuestions)
 		r.Get("/questions/offline-pack", apiHandler.GetOfflinePack)
 		r.Post("/questions/{id}/answer", apiHandler.SubmitAnswer)
 		r.Post("/sync/answers", apiHandler.SyncAnswers)
