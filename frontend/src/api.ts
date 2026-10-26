@@ -251,20 +251,34 @@ export async function submitAnswer(
   selectedOptionIds: number[],
   currentQuestionData?: Question | OfflineQuestion
 ): Promise<SubmitAnswerResponse> {
-  // 1. FAST LOCAL EVALUATION: If we have the question validation data in memory or IndexedDB
-  const offlineQ = (currentQuestionData as OfflineQuestion)?.correct_option_ids?.length 
-    ? (currentQuestionData as OfflineQuestion) 
-    : await getOfflineQuestionById(questionId)
+  const plainQuestion = currentQuestionData ? JSON.parse(JSON.stringify(currentQuestionData)) : null
 
-  if (offlineQ && offlineQ.correct_option_ids && offlineQ.correct_option_ids.length > 0) {
-    // Instant 0ms local validation!
-    const result = await submitOfflineAnswer(questionId, selectedOptionIds, offlineQ)
-    // Synchronize to server in the background (fire-and-forget)
-    syncOfflineAnswersToServer().catch(() => {})
-    return result
+  // 1. FAST LOCAL EVALUATION: If we have the question validation data in memory or IndexedDB
+  let offlineQ: OfflineQuestion | null = null
+  if ((plainQuestion as OfflineQuestion)?.correct_option_ids?.length) {
+    offlineQ = plainQuestion as OfflineQuestion
+  } else {
+    try {
+      offlineQ = await getOfflineQuestionById(questionId)
+    } catch {
+      offlineQ = null
+    }
   }
 
-  // 2. If question lacks local validation data, try server with short timeout
+  if (offlineQ && offlineQ.correct_option_ids && offlineQ.correct_option_ids.length > 0) {
+    try {
+      // Instant 0ms local validation!
+      const result = await submitOfflineAnswer(questionId, selectedOptionIds, offlineQ)
+      // Synchronize to server in the background (fire-and-forget)
+      syncOfflineAnswersToServer().catch(() => {})
+      return result
+    } catch (localErr) {
+      console.warn('Local offline submission failed, falling back to server:', localErr)
+      // Fall through to server validation below!
+    }
+  }
+
+  // 2. If question lacks local validation data or local evaluation failed, try server
   try {
     const res = await fetchWithTimeout(`${API_BASE}/questions/${questionId}/answer`, {
       method: 'POST',
@@ -276,17 +290,21 @@ export async function submitAnswer(
       const data = await res.json()
       return { ...data, is_offline: false }
     }
-  } catch {
-    // Network unreachable
+  } catch (netErr) {
+    console.warn('Server answer submission failed:', netErr)
   }
 
   // 3. Fallback to offline evaluation with whatever record exists
-  const offlineResult = await submitOfflineAnswer(
-    questionId, 
-    selectedOptionIds, 
-    currentQuestionData as OfflineQuestion
-  )
-  return { ...offlineResult, is_offline: true }
+  try {
+    const offlineResult = await submitOfflineAnswer(
+      questionId, 
+      selectedOptionIds, 
+      plainQuestion as OfflineQuestion
+    )
+    return { ...offlineResult, is_offline: true }
+  } catch (finalErr: any) {
+    throw new Error('Unable to submit answer: ' + (finalErr?.message || finalErr))
+  }
 }
 
 export async function deleteQuestion(questionId: number): Promise<void> {

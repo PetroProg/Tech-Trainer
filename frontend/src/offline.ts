@@ -12,6 +12,14 @@ interface LocalStatsMeta {
   by_category: Record<string, { answered: number; correct: number }>
 }
 
+function toPlainObject<T>(obj: T): T {
+  try {
+    return JSON.parse(JSON.stringify(obj))
+  } catch {
+    return obj
+  }
+}
+
 let dbInstance: IDBDatabase | null = null
 
 export function initOfflineDB(): Promise<IDBDatabase> {
@@ -61,24 +69,29 @@ export async function saveOfflinePack(pack: OfflinePack): Promise<void> {
 
     const getAllReq = qStore.getAll()
     getAllReq.onsuccess = () => {
-      const existingQuestions: OfflineQuestion[] = getAllReq.result || []
-      const solvedSet = new Set<number>()
-      for (const eq of existingQuestions) {
-        if (eq.is_solved) solvedSet.add(eq.id)
-      }
-
-      for (const c of pack.categories) {
-        catStore.put(c)
-      }
-
-      for (const q of pack.questions) {
-        if (solvedSet.has(q.id)) {
-          q.is_solved = true
+      try {
+        const existingQuestions: OfflineQuestion[] = getAllReq.result || []
+        const solvedSet = new Set<number>()
+        for (const eq of existingQuestions) {
+          if (eq.is_solved) solvedSet.add(eq.id)
         }
-        qStore.put(q)
-      }
 
-      metaStore.put({ key: 'last_sync', timestamp: new Date().toISOString() })
+        for (const c of pack.categories) {
+          catStore.put(toPlainObject(c))
+        }
+
+        for (const q of pack.questions) {
+          const plainQ = toPlainObject(q)
+          if (solvedSet.has(plainQ.id)) {
+            plainQ.is_solved = true
+          }
+          qStore.put(plainQ)
+        }
+
+        metaStore.put({ key: 'last_sync', timestamp: new Date().toISOString() })
+      } catch (err) {
+        console.error('saveOfflinePack serialization error:', err)
+      }
     }
 
     tx.oncomplete = () => resolve()
@@ -96,12 +109,17 @@ export async function cacheQuestions(questions: (Question | OfflineQuestion)[]):
     const qStore = tx.objectStore('questions')
 
     for (const q of questions) {
-      const offlineQ: OfflineQuestion = {
-        ...q,
-        correct_option_ids: (q as OfflineQuestion).correct_option_ids || 
-          q.options?.filter(o => o.is_correct).map(o => o.id) || []
+      try {
+        const plain = toPlainObject(q)
+        const offlineQ: OfflineQuestion = {
+          ...plain,
+          correct_option_ids: (plain as OfflineQuestion).correct_option_ids || 
+            (Array.isArray(plain.options) ? plain.options.filter(o => o && o.is_correct).map(o => o.id) : [])
+        }
+        qStore.put(offlineQ)
+      } catch (err) {
+        console.warn('cacheQuestions error:', err)
       }
-      qStore.put(offlineQ)
     }
 
     tx.oncomplete = () => resolve()
@@ -114,7 +132,7 @@ export async function saveOfflineCategory(category: Category): Promise<void> {
   const db = await initOfflineDB()
   return new Promise((resolve, reject) => {
     const tx = db.transaction('categories', 'readwrite')
-    tx.objectStore('categories').put(category)
+    tx.objectStore('categories').put(toPlainObject(category))
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
   })
@@ -223,12 +241,12 @@ export async function getOfflineQuestions(
       const selected = [...shuffledUnsolved, ...shuffledSolved].slice(0, count)
 
       const result: OfflineQuestion[] = selected.map(chosen => {
-        const sanitizedOptions = chosen.options.map(opt => ({
+        const sanitizedOptions = Array.isArray(chosen.options) ? chosen.options.map(opt => ({
           id: opt.id,
           option_text: opt.option_text,
           order_idx: opt.order_idx,
           is_correct: false
-        }))
+        })) : []
 
         return {
           id: chosen.id,
@@ -242,7 +260,7 @@ export async function getOfflineQuestions(
           language: chosen.language,
           explanation: chosen.explanation,
           options: sanitizedOptions,
-          correct_option_ids: chosen.correct_option_ids || chosen.options?.filter(o => o.is_correct).map(o => o.id) || [],
+          correct_option_ids: chosen.correct_option_ids || (Array.isArray(chosen.options) ? chosen.options.filter(o => o.is_correct).map(o => o.id) : []),
           expected_correct_count: chosen.correct_option_ids?.length || chosen.expected_correct_count || 1,
           is_solved: chosen.is_solved
         }
@@ -268,7 +286,7 @@ export async function getOfflineQuestionById(questionId: number): Promise<Offlin
     const tx = db.transaction(['questions'], 'readonly')
     const qStore = tx.objectStore('questions')
     const req = qStore.get(questionId)
-    req.onsuccess = () => resolve(req.result || null)
+    req.onsuccess = () => resolve(req.result ? toPlainObject(req.result) : null)
     req.onerror = () => reject(req.error)
   })
 }
@@ -297,68 +315,83 @@ export async function submitOfflineAnswer(
     const checkAndProcess = () => {
       if (!qDone || !statsDone) return
 
-      let q: OfflineQuestion = qReq.result || fallbackQuestion
-      if (!q) {
-        reject(new Error('Question not found in offline database'))
-        return
-      }
+      try {
+        let q: OfflineQuestion = qReq.result || (fallbackQuestion ? toPlainObject(fallbackQuestion) : null)
+        if (!q) {
+          reject(new Error('Question not found in offline database'))
+          return
+        }
 
-      if (!qReq.result && fallbackQuestion) {
-        qStore.put(fallbackQuestion)
-      }
+        // Ensure fallbackQuestion is persisted to qStore as plain object
+        if (!qReq.result && fallbackQuestion) {
+          qStore.put(toPlainObject(fallbackQuestion))
+        }
 
-      const correctOptionIds = q.correct_option_ids || q.options?.filter(o => o.is_correct).map(o => o.id) || []
-      const correctSet = new Set(correctOptionIds)
-      const isCorrect = (
-        selectedOptionIds.length === correctOptionIds.length &&
-        selectedOptionIds.every(id => correctSet.has(id))
-      )
+        const correctOptionIds: number[] = Array.isArray(q.correct_option_ids) && q.correct_option_ids.length > 0
+          ? q.correct_option_ids
+          : (Array.isArray(q.options) ? q.options.filter(o => o && o.is_correct).map(o => o.id) : [])
 
-      let stats: LocalStatsMeta = statsReq.result || {
-        key: 'stats',
-        total_answered: 0,
-        total_correct: 0,
-        current_streak: 0,
-        total_score: 0,
-        by_category: {}
-      }
+        const selIds = Array.isArray(selectedOptionIds) ? selectedOptionIds : []
+        const correctSet = new Set(correctOptionIds)
+        const isCorrect = (
+          selIds.length === correctOptionIds.length &&
+          selIds.every(id => correctSet.has(id))
+        )
 
-      stats.total_answered++
-      if (isCorrect) {
-        stats.total_correct++
-        stats.current_streak++
-        stats.total_score += 10
-      } else {
-        stats.current_streak = 0
-      }
+        let stats: LocalStatsMeta = statsReq.result || {
+          key: 'stats',
+          total_answered: 0,
+          total_correct: 0,
+          current_streak: 0,
+          total_score: 0,
+          by_category: {}
+        }
 
-      const catSlug = q.category_slug || 'unknown'
-      if (!stats.by_category[catSlug]) {
-        stats.by_category[catSlug] = { answered: 0, correct: 0 }
-      }
-      stats.by_category[catSlug].answered++
-      if (isCorrect) stats.by_category[catSlug].correct++
+        if (!stats.by_category || typeof stats.by_category !== 'object') {
+          stats.by_category = {}
+        }
 
-      metaStore.put(stats)
+        stats.total_answered++
+        if (isCorrect) {
+          stats.total_correct++
+          stats.current_streak++
+          stats.total_score += 10
+        } else {
+          stats.current_streak = 0
+        }
 
-      q.is_solved = true
-      qStore.put(q)
+        const catSlug = q.category_slug || 'unknown'
+        if (!stats.by_category[catSlug]) {
+          stats.by_category[catSlug] = { answered: 0, correct: 0 }
+        }
+        stats.by_category[catSlug].answered++
+        if (isCorrect) stats.by_category[catSlug].correct++
 
-      const answerItem: SyncAnswerItem = {
-        question_id: questionId,
-        selected_option_ids: selectedOptionIds,
-        answered_at: new Date().toISOString()
-      }
-      pendingStore.add(answerItem)
+        metaStore.put(toPlainObject(stats))
 
-      responseData = {
-        is_correct: isCorrect,
-        explanation: q.explanation,
-        correct_option_ids: correctOptionIds,
-        selected_option_ids: selectedOptionIds,
-        streak: stats.current_streak,
-        total_score: stats.total_score,
-        is_offline: true
+        q.is_solved = true
+        qStore.put(toPlainObject(q))
+
+        const answerItem: SyncAnswerItem = {
+          question_id: questionId,
+          selected_option_ids: selIds,
+          answered_at: new Date().toISOString()
+        }
+        pendingStore.add(toPlainObject(answerItem))
+
+        responseData = {
+          is_correct: isCorrect,
+          explanation: q.explanation || '',
+          correct_option_ids: correctOptionIds,
+          selected_option_ids: selIds,
+          streak: stats.current_streak,
+          total_score: stats.total_score,
+          is_offline: true
+        }
+      } catch (err: any) {
+        console.error('checkAndProcess fatal error:', err)
+        reject(err)
+        try { tx.abort() } catch {}
       }
     }
 
@@ -381,7 +414,7 @@ export async function submitOfflineAnswer(
         reject(new Error('Transaction completed without generating answer result'))
       }
     }
-    tx.onerror = () => reject(tx.error)
+    tx.onerror = () => reject(tx.error || new Error('Transaction error'))
     tx.onabort = () => reject(tx.error || new Error('Transaction aborted'))
   })
 }
@@ -440,6 +473,10 @@ export async function getOfflineStats(): Promise<UserStats> {
         by_category: {}
       }
 
+      if (!stats.by_category || typeof stats.by_category !== 'object') {
+        stats.by_category = {}
+      }
+
       const accuracy = stats.total_answered > 0
         ? Math.round((stats.total_correct / stats.total_answered) * 100)
         : 0
@@ -447,17 +484,17 @@ export async function getOfflineStats(): Promise<UserStats> {
       const byCat = Object.entries(stats.by_category).map(([slug, data]) => ({
         category_name: slug,
         category_slug: slug,
-        total_answered: data.answered,
-        total_correct: data.correct,
-        accuracy_percent: data.answered > 0 ? Math.round((data.correct / data.answered) * 100) : 0
+        total_answered: data?.answered || 0,
+        total_correct: data?.correct || 0,
+        accuracy_percent: data?.answered > 0 ? Math.round(((data.correct || 0) / data.answered) * 100) : 0
       }))
 
       resolve({
-        total_answered: stats.total_answered,
-        total_correct: stats.total_correct,
+        total_answered: stats.total_answered || 0,
+        total_correct: stats.total_correct || 0,
         accuracy_percent: accuracy,
-        current_streak: stats.current_streak,
-        total_score: stats.total_score,
+        current_streak: stats.current_streak || 0,
+        total_score: stats.total_score || 0,
         by_category: byCat
       })
     }
@@ -484,8 +521,9 @@ export async function resetOfflineStats(): Promise<void> {
       const questions: OfflineQuestion[] = req.result || []
       for (const q of questions) {
         if (q.is_solved) {
-          q.is_solved = false
-          qStore.put(q)
+          const plain = toPlainObject(q)
+          plain.is_solved = false
+          qStore.put(plain)
         }
       }
     }
