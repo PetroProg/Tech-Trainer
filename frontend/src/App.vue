@@ -556,6 +556,70 @@ function hasMultipleLines(text: string): boolean {
   return formatOptionText(text).includes('\n')
 }
 
+const parsedQuestion = computed(() => {
+  if (!currentQuestion.value) {
+    return { text: '', code: '' }
+  }
+
+  let text = currentQuestion.value.question_text || ''
+  let code = currentQuestion.value.code_snippet?.trim() || ''
+
+  // 1. Detect markdown code block fence in question_text (```lang ... ```)
+  const fenceRegex = /```(?:[a-zA-Z0-9_\-#+]*)?\n?([\s\S]*?)\n?```/
+  const match = text.match(fenceRegex)
+  if (match) {
+    if (!code) {
+      code = match[1].trim()
+    }
+    // Remove the fence from the question prompt
+    text = (text.substring(0, match.index) + '\n' + text.substring((match.index || 0) + match[0].length)).trim()
+  }
+
+  // 2. Strip any leaked "Options:\nA. ..." from the question prompt
+  const optIdx = text.search(/\n\s*Options:\s*\n/i)
+  if (optIdx !== -1) {
+    text = text.substring(0, optIdx).trim()
+  }
+
+  return { text, code }
+})
+
+const displayQuestionText = computed(() => parsedQuestion.value.text)
+const displayCodeSnippet = computed(() => parsedQuestion.value.code)
+
+const displayLanguage = computed(() => {
+  if (!currentQuestion.value) return 'text'
+  if (currentQuestion.value.language && currentQuestion.value.language.trim() !== '') {
+    return currentQuestion.value.language.trim()
+  }
+
+  // Check if language was specified in the fence (e.g. ```powershell or ```bash)
+  if (currentQuestion.value.question_text) {
+    const fenceMatch = currentQuestion.value.question_text.match(/```([a-zA-Z0-9_\-#+]+)\n?/)
+    if (fenceMatch && fenceMatch[1]) {
+      return fenceMatch[1].trim()
+    }
+  }
+
+  // Category-based fallback
+  const cat = categories.value.find(c => c.id === currentQuestion.value?.category_id || c.slug === currentQuestion.value?.category_slug)
+  const slug = cat?.slug || currentQuestion.value?.category_slug || ''
+  switch (slug) {
+    case 'cisco-networking': return 'text'
+    case 'devops-linux': return 'bash'
+    case 'powershell': return 'powershell'
+    case 'sql': return 'sql'
+    case 'golang': return 'go'
+    case 'python': return 'python'
+    case 'csharp': return 'csharp'
+    case 'cpp': return 'cpp'
+    case 'php': return 'php'
+    case 'javascript': return 'javascript'
+    case 'ai-neural-networks': return 'python'
+    default: return 'text'
+  }
+})
+
 function handleCategoryWheel(e: WheelEvent) {
   const container = e.currentTarget as HTMLElement
   if (container && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
@@ -775,14 +839,14 @@ function handleCategoryWheel(e: WheelEvent) {
 
         <!-- Question Prompt -->
         <h2 class="text-base sm:text-lg font-medium text-slate-100 leading-snug whitespace-pre-line">
-          {{ currentQuestion.question_text }}
+          {{ displayQuestionText }}
         </h2>
 
         <!-- Code Snippet -->
         <CodeBlock 
-          v-if="currentQuestion.code_snippet" 
-          :code="currentQuestion.code_snippet" 
-          :language="currentQuestion.language" 
+          v-if="displayCodeSnippet" 
+          :code="displayCodeSnippet" 
+          :language="displayLanguage" 
         />
 
         <!-- 4 Option Cards -->

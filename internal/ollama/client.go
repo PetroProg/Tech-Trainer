@@ -121,11 +121,14 @@ STRICT RULES & CONSTRAINTS:
      * In PHP, double quotes ("\n") MUST be used for newlines, never single quotes ('\n').
      * DO NOT prefix options with "Outputs: " or "Output: ".
 7. Anti-Spoiler & Code Snippet Rule:
+   - NEVER put code blocks, router configuration snippets, commands, or markdown code fences inside the "question" field! The "question" field must contain ONLY the prompt question text.
+   - If there is code, terminal commands, or Cisco router configuration to inspect/analyze, put it strictly into the "code" field, and specify its language in "language" (e.g. "text", "python", "bash", "powershell", "go").
+   - DO NOT wrap the contents of the "code" field in markdown code fences. Output clean raw code or configuration only.
    - When the question asks "Which command...", "Which PowerShell command...", "Which snippet...", "Which line of code...", or "Which of the following...", the candidate choices belong strictly in the options array!
    - Under NO circumstances put the answer command, candidate choices, or all 4 options in the code field.
    - For command questions, the code field MUST be empty "" (and language MUST be "").
    - For "Which line..." questions, the code field should only contain setup/context (e.g. string = 'hello'), NEVER dump the 4 options into the code snippet!
-   - The code field is ONLY for code that the learner is asked to inspect/analyze (e.g. "What is the output of this code snippet?", "Find the bug in this function:").
+   - The code field is ONLY for code that the learner is asked to inspect/analyze (e.g. "What is the output of this code snippet?", "Find the bug in this configuration:").
 8. Domain Truth & Anti-Hallucination:
    - Cisco / Networking:
      * IPv4 interface address assignment strictly requires dotted-decimal subnet masks: "ip address 192.168.1.1 255.255.255.0". Prefix slash notation (e.g. "/24") is NEVER valid on Cisco IOS IPv4 interfaces!

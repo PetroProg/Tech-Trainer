@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -645,6 +646,40 @@ func (d *DB) SaveGeneratedQuestion(dto models.GeneratedQuestionDTO, categoryID i
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
+	// 1. Extract fenced code block from question text if model placed code in question
+	fenceRegex := regexp.MustCompile("(?s)```([a-zA-Z0-9_\\-#+]*)\\n?(.*?)\\n?```")
+	if match := fenceRegex.FindStringSubmatch(dto.Question); len(match) > 2 {
+		fenceLang := strings.TrimSpace(match[1])
+		fenceCode := strings.TrimSpace(match[2])
+		dto.Question = strings.TrimSpace(fenceRegex.ReplaceAllString(dto.Question, ""))
+		if strings.TrimSpace(dto.Code) == "" || strings.TrimSpace(dto.Code) == fenceCode {
+			dto.Code = fenceCode
+			if dto.Language == "" && fenceLang != "" {
+				dto.Language = fenceLang
+			}
+		}
+	}
+
+	// 2. Strip leaked "Options:\nA. ..." from question prompt
+	optRegex := regexp.MustCompile("(?is)\\n\\s*options:\\s*\\n.*")
+	dto.Question = strings.TrimSpace(optRegex.ReplaceAllString(dto.Question, ""))
+
+	cleanCode := strings.TrimSpace(dto.Code)
+	if strings.HasPrefix(cleanCode, "```") {
+		if m := regexp.MustCompile("(?s)^```([a-zA-Z0-9_\\-#+]*)\\n?(.*?)\\n?```$").FindStringSubmatch(cleanCode); len(m) > 2 {
+			if dto.Language == "" && strings.TrimSpace(m[1]) != "" {
+				dto.Language = strings.TrimSpace(m[1])
+			}
+			cleanCode = strings.TrimSpace(m[2])
+		} else {
+			lines := strings.Split(cleanCode, "\n")
+			if len(lines) >= 2 && strings.HasPrefix(lines[0], "```") && strings.HasSuffix(lines[len(lines)-1], "```") {
+				cleanCode = strings.TrimSpace(strings.Join(lines[1:len(lines)-1], "\n"))
+			}
+		}
+	}
+	dto.Code = cleanCode
+
 	hash := CalculateHash(dto.Question, dto.Code)
 
 	var existsID int64
@@ -659,15 +694,6 @@ func (d *DB) SaveGeneratedQuestion(dto models.GeneratedQuestionDTO, categoryID i
 		return false, err
 	}
 	defer tx.Rollback()
-
-	cleanCode := strings.TrimSpace(dto.Code)
-	if strings.HasPrefix(cleanCode, "```") {
-		lines := strings.Split(cleanCode, "\n")
-		if len(lines) >= 2 && strings.HasPrefix(lines[0], "```") && strings.HasSuffix(lines[len(lines)-1], "```") {
-			cleanCode = strings.TrimSpace(strings.Join(lines[1:len(lines)-1], "\n"))
-		}
-	}
-	dto.Code = cleanCode
 
 	if len(dto.Code) > 0 {
 		lowerQ := strings.ToLower(dto.Question)
