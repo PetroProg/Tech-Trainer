@@ -1112,78 +1112,100 @@ function handleCategoryWheel(e: WheelEvent) {
             leave-from-class="opacity-100 scale-100 translate-y-0"
             leave-to-class="opacity-0 scale-95 translate-y-2"
           >
-            <div v-if="showStatsModal" class="relative bg-slate-900/95 border border-slate-700/80 rounded-2xl p-6 max-w-md w-full shadow-2xl shadow-black/90 overflow-hidden">
+            <div v-if="showStatsModal" class="relative bg-slate-900/95 border border-slate-700/80 rounded-2xl p-6 sm:p-7 max-w-xl w-full shadow-2xl shadow-black/90 overflow-hidden">
               <!-- Top Glow Accent -->
-              <div class="absolute -top-14 left-1/2 -translate-x-1/2 w-48 h-32 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none"></div>
-        <div class="flex items-center justify-between pb-3 border-b border-slate-800">
-          <h3 class="text-base font-bold text-slate-100 flex items-center gap-2">
-            <svg class="w-4 h-4 text-sky-400" fill="currentColor" viewBox="0 0 20 20">
-              <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/>
-            </svg>
-            <span>Your Performance</span>
-          </h3>
-          <button @click="showStatsModal = false" class="text-slate-400 hover:text-white"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
-        </div>
+              <div class="absolute -top-14 left-1/2 -translate-x-1/2 w-64 h-32 bg-sky-500/15 rounded-full blur-3xl pointer-events-none"></div>
 
-        <div class="mt-4 grid grid-cols-3 gap-2 text-center">
-          <div class="p-3 bg-slate-950 border border-slate-800 rounded-xl">
-            <div class="text-xl font-bold text-sky-400">{{ stats?.total_answered || 0 }}</div>
-            <div class="text-[10px] text-slate-400 mt-0.5">Answered</div>
-          </div>
-          <div class="p-3 bg-slate-950 border border-slate-800 rounded-xl">
-            <div class="text-xl font-bold text-emerald-400">{{ Math.round(stats?.accuracy_percent || 0) }}%</div>
-            <div class="text-[10px] text-slate-400 mt-0.5">Accuracy</div>
-          </div>
-          <div class="p-3 bg-slate-950 border border-slate-800 rounded-xl">
-            <div class="text-xl font-bold text-amber-400">{{ stats?.current_streak || 0 }}</div>
-            <div class="text-[10px] text-slate-400 mt-0.5">Streak</div>
-          </div>
-        </div>
-
-        <!-- Category Breakdown -->
-        <div class="mt-4">
-          <h4 class="text-xs font-semibold text-slate-300 mb-2">By Category:</h4>
-          <div class="space-y-2 max-h-48 overflow-y-auto">
-            <div 
-              v-for="cs in stats?.by_category" 
-              :key="cs.category_slug"
-              class="p-2.5 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-between text-xs"
-            >
-              <div>
-                <div class="font-medium text-slate-200">{{ cs.category_name }}</div>
-                <div class="text-[10px] text-slate-400">Solved: {{ cs.total_correct }} of {{ cs.total_answered }}</div>
+              <div class="flex items-center justify-between pb-3.5 border-b border-slate-800/80">
+                <h3 class="text-base font-bold text-slate-100 flex items-center gap-2">
+                  <div class="p-1.5 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-400">
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                      <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/>
+                    </svg>
+                  </div>
+                  <span>Your Performance</span>
+                </h3>
+                <button 
+                  @click="showStatsModal = false" 
+                  class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
+                >
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
               </div>
-              <div class="font-bold text-sky-400">
-                {{ Math.round(cs.accuracy_percent) }}%
+
+              <!-- Stat Cards Top Row -->
+              <div class="mt-4 grid grid-cols-3 gap-2.5 text-center">
+                <div class="p-3.5 bg-slate-950/80 border border-slate-800/90 rounded-xl relative overflow-hidden group">
+                  <div class="text-2xl font-extrabold text-sky-400">{{ stats?.total_answered || 0 }}</div>
+                  <div class="text-[11px] font-medium text-slate-400 mt-0.5">Answered</div>
+                </div>
+                <div class="p-3.5 bg-slate-950/80 border border-slate-800/90 rounded-xl relative overflow-hidden group">
+                  <div class="text-2xl font-extrabold text-emerald-400">{{ Math.round(stats?.accuracy_percent || 0) }}%</div>
+                  <div class="text-[11px] font-medium text-slate-400 mt-0.5">Accuracy</div>
+                </div>
+                <div class="p-3.5 bg-slate-950/80 border border-slate-800/90 rounded-xl relative overflow-hidden group">
+                  <div class="text-2xl font-extrabold text-amber-400">{{ stats?.current_streak || 0 }}</div>
+                  <div class="text-[11px] font-medium text-slate-400 mt-0.5">Streak</div>
+                </div>
+              </div>
+
+              <!-- Category Breakdown -->
+              <div class="mt-5">
+                <div class="flex items-center justify-between mb-2.5">
+                  <h4 class="text-xs font-semibold uppercase tracking-wider text-slate-400">By Category</h4>
+                  <span class="text-[11px] text-slate-500 font-medium">{{ stats?.by_category?.length || 0 }} categories</span>
+                </div>
+                <div class="space-y-2 max-h-72 sm:max-h-80 overflow-y-auto pr-1.5 custom-scrollbar">
+                  <div 
+                    v-for="cs in stats?.by_category" 
+                    :key="cs.category_slug"
+                    class="p-3 bg-slate-950/70 hover:bg-slate-950 border border-slate-800/80 hover:border-slate-700/80 rounded-xl flex items-center justify-between text-xs transition"
+                  >
+                    <div class="min-w-0 pr-3">
+                      <div class="font-semibold text-slate-200 truncate">{{ cs.category_name }}</div>
+                      <div class="text-[11px] text-slate-400 mt-0.5">Solved: {{ cs.total_correct }} of {{ cs.total_answered }}</div>
+                    </div>
+                    <div class="text-right shrink-0">
+                      <div class="font-bold text-sm" :class="cs.accuracy_percent >= 75 ? 'text-emerald-400' : (cs.accuracy_percent >= 50 ? 'text-sky-400' : 'text-amber-400')">
+                        {{ Math.round(cs.accuracy_percent) }}%
+                      </div>
+                      <div class="w-16 bg-slate-800 rounded-full h-1 mt-1 overflow-hidden">
+                        <div 
+                          class="h-full rounded-full transition-all duration-300"
+                          :class="cs.accuracy_percent >= 75 ? 'bg-emerald-500' : (cs.accuracy_percent >= 50 ? 'bg-sky-500' : 'bg-amber-500')"
+                          :style="{ width: `${Math.min(100, Math.max(0, cs.accuracy_percent))}%` }"
+                        ></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-if="!stats?.by_category?.length" class="text-center text-xs text-slate-500 py-6">
+                    You haven't answered any questions yet
+                  </div>
+                </div>
+              </div>
+
+              <!-- Footer Buttons -->
+              <div class="mt-6 flex items-center gap-2.5 pt-2 border-t border-slate-800/60">
+                <button 
+                  type="button"
+                  @click="handleResetStats"
+                  class="px-4 py-2.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 rounded-xl text-xs font-semibold transition active:scale-[0.98] flex items-center justify-center gap-1.5 cursor-pointer"
+                  title="Reset all performance statistics"
+                >
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  <span>Reset Stats</span>
+                </button>
+                <button 
+                  type="button"
+                  @click="showStatsModal = false"
+                  class="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 rounded-xl text-xs font-semibold transition active:scale-[0.98] cursor-pointer shadow-sm"
+                >
+                  Close
+                </button>
               </div>
             </div>
-            <div v-if="!stats?.by_category?.length" class="text-center text-xs text-slate-500 py-3">
-              You haven't answered any questions yet
-            </div>
-          </div>
-        </div>
-
-        <div class="mt-5 flex items-center gap-2">
-          <button 
-            type="button"
-            @click="handleResetStats"
-            class="px-3.5 py-2.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 rounded-xl text-xs font-semibold transition active:scale-[0.98] flex items-center justify-center gap-1.5"
-            title="Reset all performance statistics"
-          >
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
-            <span>Reset Stats</span>
-          </button>
-          <button 
-            type="button"
-            @click="showStatsModal = false"
-            class="flex-1 py-2.5 bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/80 rounded-xl text-xs font-semibold transition active:scale-[0.98]"
-          >
-            Close
-          </button>
-        </div>
-      </div>
           </Transition>
         </div>
       </Transition>
@@ -1205,6 +1227,30 @@ function handleCategoryWheel(e: WheelEvent) {
 </template>
 
 <style scoped>
+/* Custom Vertical Scrollbar */
+.custom-scrollbar {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: #334155 #0f172a;
+}
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: 9999px;
+  margin: 3px 0;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  transition: background 0.2s ease;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #0ea5e9;
+}
+
 .category-scrollbar {
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
