@@ -8,42 +8,39 @@ import (
 	"sync"
 	"time"
 
+	"github.com/PetroProg/tech-trainer/internal/ai"
 	"github.com/PetroProg/tech-trainer/internal/config"
 	"github.com/PetroProg/tech-trainer/internal/db"
 	"github.com/PetroProg/tech-trainer/internal/models"
-	"github.com/PetroProg/tech-trainer/internal/ollama"
 )
 
 // Worker coordinates periodic checks, question pruning, and on-demand batch generation.
 type Worker struct {
-	cfg          *config.Config
-	database     *db.DB
-	ollamaClient *ollama.Client
-	triggerChan  chan struct{}
-	mu           sync.RWMutex
-	status       models.OllamaStatus
+	cfg         *config.Config
+	database    *db.DB
+	aiClient    ai.AIClient
+	triggerChan chan struct{}
+	mu          sync.RWMutex
+	status      models.OllamaStatus
 }
 
 // NewWorker initializes a new background worker instance.
-func NewWorker(cfg *config.Config, database *db.DB, ollamaClient *ollama.Client) *Worker {
+func NewWorker(cfg *config.Config, database *db.DB, aiClient ai.AIClient) *Worker {
 	return &Worker{
-		cfg:          cfg,
-		database:     database,
-		ollamaClient: ollamaClient,
-		triggerChan:  make(chan struct{}, 1),
+		cfg:         cfg,
+		database:    database,
+		aiClient:    aiClient,
+		triggerChan: make(chan struct{}, 1),
 		status: models.OllamaStatus{
-			ModelName: cfg.OllamaModel,
+			ModelName: aiClient.GetModelName(),
 		},
 	}
 }
 
 // Start begins the background check loop and scheduled tickers.
 func (w *Worker) Start(ctx context.Context) {
-	log.Printf("[Worker] Background worker started. Check interval: %v, Threshold: < %d, Target pool: %d/category",
-		w.cfg.CheckIntervalHours, w.cfg.MinCategoryBuffer, w.cfg.BatchSize)
-
-	// Note: We do NOT aggressively trigger GPU generation on startup.
-	// The GPU remains completely asleep unless tasks drop below threshold or manual trigger is used.
+	log.Printf("[Worker] Background worker started. AI Model: %s (Provider: %s), Check interval: %v, Threshold: < %d, Target pool: %d/category",
+		w.aiClient.GetModelName(), w.cfg.AIProvider, w.cfg.CheckIntervalHours, w.cfg.MinCategoryBuffer, w.cfg.BatchSize)
 
 	ticker := time.NewTicker(w.cfg.CheckIntervalHours)
 	defer ticker.Stop()
@@ -91,7 +88,7 @@ func (w *Worker) updateStatus(online, running bool, result string) {
 	}
 }
 
-// checkAndGenerate enforces the question retention policy and triggers Ollama ONLY when a category has < 15 questions.
+// checkAndGenerate enforces the question retention policy and triggers generation ONLY when a category has < 15 questions.
 func (w *Worker) checkAndGenerate(ctx context.Context, source string) {
 	w.mu.Lock()
 	if w.status.IsRunning {
@@ -127,29 +124,29 @@ func (w *Worker) checkAndGenerate(ctx context.Context, source string) {
 		}
 	}
 
-	// STRICT RULE: Launch Ollama ONLY when a category has < 15 questions left!
+	// Launch AI generator ONLY when a category has < 15 questions left!
 	if len(needRefill) == 0 {
-		log.Printf("[Worker] All categories have >= %d questions. Ollama will not be launched. (source: %s)",
+		log.Printf("[Worker] All categories have >= %d questions. AI generator will not be launched. (source: %s)",
 			w.cfg.MinCategoryBuffer, source)
-		w.updateStatus(true, false, fmt.Sprintf("All categories healthy (>= %d questions). Ollama idle.", w.cfg.MinCategoryBuffer))
+		w.updateStatus(true, false, fmt.Sprintf("All categories healthy (>= %d questions). %s idle.", w.cfg.MinCategoryBuffer, w.aiClient.GetModelName()))
 		return
 	}
 
-	// 4. Verify Ollama connectivity
-	isOnline := w.ollamaClient.Ping(ctx)
+	// 4. Verify AI connectivity
+	isOnline := w.aiClient.Ping(ctx)
 	w.updateStatus(isOnline, false, "")
 
 	if !isOnline {
-		log.Printf("[Worker] Category refill needed (< %d), but Ollama is offline (%s). Will retry later.",
-			w.cfg.MinCategoryBuffer, w.cfg.OllamaURL)
-		w.updateStatus(false, false, fmt.Sprintf("Ollama unreachable at %s (refill pending for %d categories)", w.cfg.OllamaURL, len(needRefill)))
+		log.Printf("[Worker] Category refill needed (< %d), but AI service '%s' is offline. Will retry later.",
+			w.cfg.MinCategoryBuffer, w.aiClient.GetModelName())
+		w.updateStatus(false, false, fmt.Sprintf("AI service '%s' unreachable (refill pending for %d categories)", w.aiClient.GetModelName(), len(needRefill)))
 		return
 	}
 
-	log.Printf("[Worker] Ollama is online! %d categories have < %d questions. Refilling up to %d questions...",
-		len(needRefill), w.cfg.MinCategoryBuffer, w.cfg.BatchSize)
+	log.Printf("[Worker] AI model '%s' is online! %d categories have < %d questions. Refilling up to %d questions...",
+		w.aiClient.GetModelName(), len(needRefill), w.cfg.MinCategoryBuffer, w.cfg.BatchSize)
 
-	w.updateStatus(true, true, fmt.Sprintf("Refilling pool up to %d questions for %d categories...", w.cfg.BatchSize, len(needRefill)))
+	w.updateStatus(true, true, fmt.Sprintf("Refilling pool up to %d questions for %d categories via %s...", w.cfg.BatchSize, len(needRefill), w.aiClient.GetModelName()))
 	w.generateCategoryBatches(ctx, needRefill)
 }
 
@@ -160,10 +157,10 @@ func (w *Worker) generateCategoryBatches(ctx context.Context, categories []model
 		return
 	}
 
-	// Ensure GPU VRAM is completely freed after batch completes or aborts
+	// Ensure GPU VRAM is completely freed after batch completes or aborts (no-op for Gemini)
 	defer func() {
-		_ = w.ollamaClient.UnloadModel(context.Background())
-		log.Println("[Worker] Unloaded Ollama model from GPU VRAM. GPU returned to idle.")
+		_ = w.aiClient.UnloadModel(context.Background())
+		log.Printf("[Worker] Completed batch session for AI model '%s'.", w.aiClient.GetModelName())
 	}()
 
 	targetPerCategory := w.cfg.BatchSize // 50 questions target per category
@@ -172,8 +169,13 @@ func (w *Worker) generateCategoryBatches(ctx context.Context, categories []model
 
 	difficulties := []string{"junior"} // 100% Junior practical level (no middle complexity)
 
+	// Rate limit delay: Gemini free tier limit is 15 RPM (~4s/req).
+	sleepDur := 1 * time.Second
+	if w.cfg.AIProvider == "gemini" {
+		sleepDur = 3 * time.Second
+	}
+
 	for _, cat := range categories {
-		// Calculate how many questions are actually needed to reach 50
 		needed := targetPerCategory - cat.AvailableQuestions
 		if needed <= 0 {
 			continue
@@ -197,14 +199,14 @@ func (w *Worker) generateCategoryBatches(ctx context.Context, categories []model
 			diff := difficulties[rand.Intn(len(difficulties))]
 
 			genCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
-			dto, err := w.ollamaClient.GenerateQuestion(genCtx, cat.Name, cat.PromptInstructions, diff)
+			dto, err := w.aiClient.GenerateQuestion(genCtx, cat.Name, cat.PromptInstructions, diff)
 			cancel()
 
 			if err != nil {
 				log.Printf("[Worker] Error generating question for '%s': %v", cat.Name, err)
-				if !w.ollamaClient.Ping(ctx) {
-					log.Println("[Worker] Ollama disconnected mid-batch. Halting.")
-					w.updateStatus(false, false, "Ollama disconnected during generation")
+				if !w.aiClient.Ping(ctx) {
+					log.Printf("[Worker] AI service '%s' disconnected mid-batch. Halting.", w.aiClient.GetModelName())
+					w.updateStatus(false, false, fmt.Sprintf("AI service '%s' disconnected during generation", w.aiClient.GetModelName()))
 					return
 				}
 				time.Sleep(2 * time.Second)
@@ -224,12 +226,11 @@ func (w *Worker) generateCategoryBatches(ctx context.Context, categories []model
 				log.Printf("[Worker] Duplicate question skipped for '%s'", cat.Name)
 			}
 
-			// 1-second pause to prevent thermal saturation of GPU
-			time.Sleep(1 * time.Second)
+			time.Sleep(sleepDur)
 		}
 	}
 
-	resultMsg := fmt.Sprintf("Batch complete: generated %d, saved %d questions across %d categories", totalGenerated, totalSaved, len(categories))
+	resultMsg := fmt.Sprintf("Batch complete: generated %d, saved %d questions across %d categories (%s)", totalGenerated, totalSaved, len(categories), w.aiClient.GetModelName())
 	log.Printf("[Worker] %s", resultMsg)
 	w.updateStatus(true, false, resultMsg)
 }

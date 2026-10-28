@@ -12,9 +12,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/PetroProg/tech-trainer/internal/ai"
 	"github.com/PetroProg/tech-trainer/internal/api"
 	"github.com/PetroProg/tech-trainer/internal/config"
 	"github.com/PetroProg/tech-trainer/internal/db"
+	"github.com/PetroProg/tech-trainer/internal/gemini"
 	"github.com/PetroProg/tech-trainer/internal/ollama"
 	"github.com/PetroProg/tech-trainer/internal/worker"
 	"github.com/go-chi/chi/v5"
@@ -33,8 +35,16 @@ func main() {
 	defer database.Close()
 	log.Printf("[Main] Database opened at %s", cfg.DBPath)
 
-	ollamaClient := ollama.NewClient(cfg.OllamaURL, cfg.OllamaModel)
-	bgWorker := worker.NewWorker(cfg, database, ollamaClient)
+	var aiClient ai.AIClient
+	if cfg.AIProvider == "ollama" {
+		log.Printf("[Main] Initializing Ollama provider at %s (model: %s)", cfg.OllamaURL, cfg.OllamaModel)
+		aiClient = ollama.NewClient(cfg.OllamaURL, cfg.OllamaModel)
+	} else {
+		log.Printf("[Main] Initializing Google Gemini provider (model: %s)", cfg.GeminiModel)
+		aiClient = gemini.NewClient(cfg.GeminiBaseURL, cfg.GeminiAPIKey, cfg.GeminiModel)
+	}
+
+	bgWorker := worker.NewWorker(cfg, database, aiClient)
 
 	// Context for graceful shutdown and background worker cancellation
 	ctx, cancel := context.WithCancel(context.Background())

@@ -36,6 +36,10 @@ COPY --from=backend-builder /app/tech-trainer /app/tech-trainer
 
 ENV PORT=8080 \
     DB_PATH=/data/trainer.db \
+    AI_PROVIDER=gemini \
+    GEMINI_API_KEY="" \
+    GEMINI_MODEL=gemini-3.5-flash-lite \
+    GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta \
     OLLAMA_URL=http://100.114.251.81:11434 \
     OLLAMA_MODEL=qwen2.5:7b \
     CHECK_INTERVAL_HOURS=4 \

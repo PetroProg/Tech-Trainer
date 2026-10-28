@@ -35,6 +35,11 @@ func NewClient(baseURL, modelName string) *Client {
 	}
 }
 
+// GetModelName returns the configured model identifier.
+func (c *Client) GetModelName() string {
+	return c.modelName
+}
+
 // Ping checks if the Ollama service is reachable and responsive.
 func (c *Client) Ping(ctx context.Context) bool {
 	reqCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
