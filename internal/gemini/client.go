@@ -14,9 +14,12 @@ import (
 	"github.com/PetroProg/tech-trainer/internal/models"
 )
 
-var prefixRegex = regexp.MustCompile(`^(?i)[A-D1-4][\.\)\:\-]\s*`)
-var ciscoCidrRegex = regexp.MustCompile(`(?i)ip\s+address\s+[0-9\.]+\s*/\d+`)
-var fenceRegex = regexp.MustCompile("(?s)```([a-zA-Z0-9_\\-#+]*)\\n?(.*?)\\n?```")
+var (
+	prefixRegex      = regexp.MustCompile(`^(?i)(?:option\s*)?[A-D1-4][\.\)\:\-]\s*`)
+	dummyOptionRegex = regexp.MustCompile(`^(?i)option\s+[a-d0-9]$`)
+	ciscoCidrRegex   = regexp.MustCompile(`(?i)ip\s+address\s+[0-9\.]+\s*/\d+`)
+	fenceRegex       = regexp.MustCompile("(?s)```([a-zA-Z0-9_\\-#+]*)\\n?(.*?)\\n?```")
+)
 
 // Client handles communication with Google Gemini Generative Language REST API.
 type Client struct {
@@ -118,58 +121,59 @@ type geminiResponse struct {
 
 // GenerateQuestion requests a structured technical question from Google Gemini API with strict validation.
 func (c *Client) GenerateQuestion(ctx context.Context, categoryName, promptInstructions, difficulty string) (*models.GeneratedQuestionDTO, error) {
-	systemPrompt := `You are a Principal Software Engineer and Technical Certification Examination Architect (Cisco CCNA/CCNP, AWS, Linux Foundation, CKA, Core Language teams).
-Your mission is to formulate exactly 1 high-quality, practical, 100% factually accurate engineering examination challenge.
+	diffLevel := strings.ToLower(strings.TrimSpace(difficulty))
+	if diffLevel != "middle" {
+		diffLevel = "junior"
+	}
 
-STRICT RULES & CONSTRAINTS:
-1. Target Audience & Difficulty: STRICT JUNIOR / PRACTICAL ENTRY-LEVEL ONLY.
-   - The user is NOT an advanced developer. Keep challenges accessible, clear, and practical.
-   - Focus on essential language syntax, common data structures (lists, arrays, dicts, slices, maps, strings), basic loops, conditions, and popular standard library functions.
-   - STRICTLY FORBIDDEN: Deep runtime internals, complex concurrency/multithreading race conditions, low-level memory allocation, reflection, or complex architectural patterns.
-2. Code Snippets & Speed (Fast Code Trainer):
-   - Keep code snippets SHORT, CLEAN, and FAST TO READ (4 to 10 lines max).
-   - Questions must be quick and direct: "What is the output of this code?", "Which line contains a bug or syntax error?", "What does this function return?", "Which snippet accomplishes X?".
-   - A learner should be able to read, understand, and answer in 15 to 30 seconds.
-3. Language: Professional, concise, grammatical English.
-4. Options: Exactly 4 options.
-5. Correct Answers Policy:
-   - For ~75% of questions: exactly 1 correct answer (single-choice). correct_indices: [X].
-   - For ~25% of questions: exactly 2 correct answers (multi-select). correct_indices: [X, Y].
-   - NEVER generate 0, 3, or 4 correct answers.
-   - MANDATORY CLARITY: If exactly 2 options are correct, the question text MUST end with " (Choose two)".
-   - If only 1 option is correct, the question MUST NOT say "select all that apply" or "choose two". Phrasing must be "Which command...", "What is the result...", or "(Choose one)".
-6. Option Uniqueness & Formatting:
-   - ALL 4 options MUST BE COMPLETELY UNIQUE in text, syntax, and meaning. NEVER duplicate options!
-   - DO NOT prefix options with letters or numbers (e.g. do NOT write "A. ", "B. ", "1. ", "Option 1:"). Write only the raw command, code, or answer text.
-   - All distractors (incorrect options) must be realistic, plausible mistakes that people commonly make, but definitively invalid/incorrect.
-   - Escape Characters & Multi-line Outputs:
-     * NEVER output unrendered escape characters like literal "\n" or "\t" in options, question text, or explanations.
-     * When predicting terminal output, format actual multiple lines naturally, DO NOT write "\n".
-     * In PHP, double quotes ("\n") MUST be used for newlines, never single quotes ('\n').
-     * DO NOT prefix options with "Outputs: " or "Output: ".
-7. Anti-Spoiler & Code Snippet Rule:
-   - NEVER put code blocks, router configuration snippets, commands, or markdown code fences inside the "question" field! The "question" field must contain ONLY the prompt question text.
-   - If there is code, terminal commands, or Cisco router configuration to inspect/analyze, put it strictly into the "code" field, and specify its language in "language" (e.g. "text", "python", "bash", "powershell", "go").
-   - DO NOT wrap the contents of the "code" field in markdown code fences. Output clean raw code or configuration only.
-   - When the question asks "Which command...", "Which PowerShell command...", "Which snippet...", "Which line of code...", or "Which of the following...", the candidate choices belong strictly in the options array!
-   - Under NO circumstances put the answer command, candidate choices, or all 4 options in the code field.
-   - For command questions, the code field MUST be empty "" (and language MUST be "").
-   - For "Which line..." questions, the code field should only contain setup/context (e.g. string = 'hello'), NEVER dump the 4 options into the code snippet!
-   - The code field is ONLY for code that the learner is asked to inspect/analyze (e.g. "What is the output of this code snippet?", "Find the bug in this configuration:").
-8. Domain Truth & Anti-Hallucination:
-   - Cisco / Networking:
-     * IPv4 interface address assignment strictly requires dotted-decimal subnet masks: "ip address 192.168.1.1 255.255.255.0". Prefix slash notation (e.g. "/24") is NEVER valid on Cisco IOS IPv4 interfaces!
-     * "ip default-gateway" is only for Layer 2 switches or devices with "no ip routing". On a routing Cisco router, use a default static route: "ip route 0.0.0.0 0.0.0.0 <next-hop>".
-     * Always distinguish between global config mode, interface mode, and line mode.
-   - Code & Linux:
-     * Use genuine syntax and standard library behaviors.
-9. Explanation:
-   - Detailed, rigorous explanation: explain why the correct choice(s) work under the hood, and explicitly explain why each distractor is wrong.
+	systemPrompt := `You are a Principal Software Engineer and Technical Certification Examination Architect (Cisco CCIE/CCNP, Linux Foundation, Docker/CNCF CKA, and Senior Language Runtimes).
+Your mission is to formulate exactly 1 high-quality, practical, factually accurate engineering examination challenge.
+
+CORE ARCHITECTURE & DIVERSITY:
+1. Difficulty Handling:
+   - When Target difficulty is "middle": Produce substantive, production-grade challenges. Focus on system internals, protocol states, edge cases, subtle bugs, performance trade-offs, configuration pitfalls, and diagnostic reasoning.
+   - When Target difficulty is "junior": Focus on foundational syntax, core standard library APIs, basic logic, and essential commands. Keep it clean and accessible.
+
+2. Question Formats (Balanced Mix):
+   - You MUST vary between TWO distinct question formats:
+     A) Pure Conceptual / Theoretical / Architectural ("type": "multiple_choice"):
+        * Deep multiple-choice questions on system behavior, protocol mechanics, architecture, or operational troubleshooting.
+        * For these questions, "code" MUST be empty "" and "language" MUST be "". DO NOT invent fake or unnecessary code snippets!
+     B) Practical Code / Configuration Analysis ("type": "code_analysis"):
+        * The learner inspects a concise, realistic code or configuration snippet (4-12 lines) placed in "code" (e.g. Cisco IOS config, Dockerfile, systemd unit, bash script, language snippet).
+
+3. STRICT ANTI-CLICHE BLACKLIST (CRITICAL):
+   - NEVER generate trivial beginner toy loops (e.g. filtering even/odd numbers, summing array items, doubling numbers, reversing a string, printing 1 to N).
+   - NEVER generate repetitive single-command recall questions (e.g. "Which Docker command lists running containers? -> docker ps", "Which flag maps a port? -> -p", "Which command views interfaces? -> show ip interface brief").
+   - NEVER duplicate identical problem patterns across different programming languages.
+   - For Infrastructure (Cisco, Docker, Linux): test real operational mechanisms (e.g. OSPF adjacency states, STP BPDU guard, 802.1Q subinterfaces, multi-stage build caching, PID 1 zombie reaping, Linux process signals, inodes, iptables chains).
+   - For DevOps & Linux: ONLY use bash, Dockerfile, yaml, systemd unit files, or terminal diagnostics. NEVER generate application source code (Go, Java, C#, C++ SDKs).
+
+4. Code Snippet Rules & Anti-Spoiler:
+   - NEVER place markdown code blocks (triple backticks) in the "question" field! The "question" field must contain ONLY plain text instructions.
+   - If there is code/config to inspect, place it strictly in the "code" field without markdown fences.
+   - If the question asks "Which command..." or "Which code snippet...", candidate choices belong in the "options" array, NOT in "code".
+   - Code snippets must be syntactically complete. Never truncate or cut off code mid-line.
+
+5. Options Policy:
+   - Exactly 4 completely unique options.
+   - NEVER use placeholder option names like "Option A", "Option B", "Option 1", "Option 2".
+   - NEVER prefix options with letters or numbers ("A. ", "1. ", "Option A:").
+   - 1 or 2 correct answers (~75% single-choice with 1 correct, ~25% multi-select with 2 correct).
+   - If exactly 2 options are correct, question text MUST end with " (Choose two)".
+   - If only 1 option is correct, question MUST NOT say "choose two" or "select all".
+
+6. Domain Truth & Anti-Hallucination:
+   - Cisco: IPv4 interface IP assignment strictly requires dotted-decimal masks (e.g. 255.255.255.0). Slash /CIDR notation is invalid on Cisco IOS interfaces. Default gateway on a router is configured via static route (e.g. "ip route 0.0.0.0 0.0.0.0 <next-hop>"), never "ip default-gateway".
+   - Code & Linux: Genuine syntax and standard library behaviors only.
+
+7. Explanation:
+   - Rigorous explanation: why the correct choice(s) work under the hood, and why each distractor is wrong.
 
 STRICT JSON OUTPUT FORMAT (NO EXTRA KEYS):
 {
   "type": "multiple_choice",
-  "difficulty": "junior",
+  "difficulty": "middle",
   "question": "Question text here... (Choose two if 2 answers are correct)",
   "code": "",
   "language": "",
@@ -183,8 +187,8 @@ STRICT JSON OUTPUT FORMAT (NO EXTRA KEYS):
   "explanation": "Detailed explanation..."
 }`
 
-	userPrompt := fmt.Sprintf("Category: %s\nTopic guidelines: %s\nTarget difficulty: %s\n\nFormulate a practical engineering challenge strictly matching the JSON format.",
-		categoryName, promptInstructions, difficulty)
+	userPrompt := fmt.Sprintf("Category: %s\nTopic guidelines: %s\nTarget difficulty: %s\n\nFormulate a high-quality engineering challenge strictly matching the JSON format.",
+		categoryName, promptInstructions, diffLevel)
 
 	reqBody := geminiRequest{
 		Contents: []geminiContent{
@@ -240,45 +244,59 @@ STRICT JSON OUTPUT FORMAT (NO EXTRA KEYS):
 		return nil, fmt.Errorf("gemini returned no content candidates")
 	}
 
-	rawText := strings.TrimSpace(geminiResp.Candidates[0].Content.Parts[0].Text)
-	if rawText == "" {
-		return nil, fmt.Errorf("gemini returned empty text payload")
-	}
+	rawJSON := geminiResp.Candidates[0].Content.Parts[0].Text
+	rawJSON = strings.TrimSpace(rawJSON)
 
-	// Strip markdown code fences if present
-	cleanJSON := rawText
-	if strings.HasPrefix(cleanJSON, "```") {
-		if idx := strings.Index(cleanJSON, "\n"); idx != -1 {
-			cleanJSON = cleanJSON[idx+1:]
+	// Strip potential markdown code fences from JSON output
+	if strings.HasPrefix(rawJSON, "```") {
+		firstNewline := strings.Index(rawJSON, "\n")
+		if firstNewline != -1 {
+			rawJSON = rawJSON[firstNewline+1:]
 		}
-		if strings.HasSuffix(cleanJSON, "```") {
-			cleanJSON = cleanJSON[:len(cleanJSON)-3]
+		if idx := strings.LastIndex(rawJSON, "```"); idx != -1 {
+			rawJSON = rawJSON[:idx]
 		}
-		cleanJSON = strings.TrimSpace(cleanJSON)
+		rawJSON = strings.TrimSpace(rawJSON)
 	}
 
 	var dto models.GeneratedQuestionDTO
-	if err := json.Unmarshal([]byte(cleanJSON), &dto); err != nil {
-		return nil, fmt.Errorf("failed to parse generated question json: %w (raw: %s)", err, rawText)
+	if err := json.Unmarshal([]byte(rawJSON), &dto); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal question JSON: %w (raw: %s)", err, rawJSON)
 	}
 
-	// Quality checks & sanitization
+	// Overwrite difficulty with target
+	dto.Difficulty = diffLevel
+
+	// Strict Quality and Correctness Validation
+	if err := c.validateAndCleanDTO(&dto, categoryName, promptInstructions); err != nil {
+		return nil, fmt.Errorf("validation error: %w", err)
+	}
+
+	return &dto, nil
+}
+
+// validateAndCleanDTO ensures the generated question meets all correctness, formatting, and safety standards.
+func (c *Client) validateAndCleanDTO(dto *models.GeneratedQuestionDTO, categoryName, promptInstructions string) error {
 	if len(dto.Options) != 4 {
-		return nil, fmt.Errorf("invalid options count: expected 4, got %d", len(dto.Options))
+		return fmt.Errorf("invalid options count: expected 4, got %d", len(dto.Options))
 	}
 
-	// 1. Strip redundant option prefixes ("A. ", "1. ", etc.)
+	// 1. Strip redundant option prefixes ("A. ", "1. ", "Option 1:", etc.) and reject placeholders
 	seen := make(map[string]bool)
 	for i, opt := range dto.Options {
 		trimmed := strings.TrimSpace(opt)
+		if dummyOptionRegex.MatchString(trimmed) {
+			return fmt.Errorf("placeholder dummy option detected: %q", trimmed)
+		}
+
 		cleaned := prefixRegex.ReplaceAllString(trimmed, "")
 		cleaned = strings.TrimSpace(cleaned)
 
-		if cleaned == "" {
-			return nil, fmt.Errorf("option %d is empty", i)
+		if cleaned == "" || dummyOptionRegex.MatchString(cleaned) {
+			return fmt.Errorf("option %d is empty or placeholder (%q)", i, opt)
 		}
 		if seen[cleaned] {
-			return nil, fmt.Errorf("duplicate option detected: %q", cleaned)
+			return fmt.Errorf("duplicate option detected: %q", cleaned)
 		}
 		seen[cleaned] = true
 		dto.Options[i] = cleaned
@@ -286,16 +304,16 @@ STRICT JSON OUTPUT FORMAT (NO EXTRA KEYS):
 
 	// 2. Validate CorrectIndices
 	if len(dto.CorrectIndices) < 1 || len(dto.CorrectIndices) > 2 {
-		return nil, fmt.Errorf("invalid correct_indices count: expected 1 or 2, got %d", len(dto.CorrectIndices))
+		return fmt.Errorf("invalid correct_indices count: expected 1 or 2, got %d", len(dto.CorrectIndices))
 	}
 
 	correctSet := make(map[int]bool)
 	for _, idx := range dto.CorrectIndices {
 		if idx < 0 || idx >= 4 {
-			return nil, fmt.Errorf("correct_index %d out of bounds [0..3]", idx)
+			return fmt.Errorf("correct_index %d out of bounds [0..3]", idx)
 		}
 		if correctSet[idx] {
-			return nil, fmt.Errorf("duplicate index %d in correct_indices", idx)
+			return fmt.Errorf("duplicate index %d in correct_indices", idx)
 		}
 		correctSet[idx] = true
 	}
@@ -307,10 +325,10 @@ STRICT JSON OUTPUT FORMAT (NO EXTRA KEYS):
 	if isCisco {
 		for i, opt := range dto.Options {
 			if correctSet[i] && ciscoCidrRegex.MatchString(opt) {
-				return nil, fmt.Errorf("cisco hallucination: /CIDR mask in ip address on interface: %q", opt)
+				return fmt.Errorf("cisco hallucination: /CIDR mask in ip address on interface: %q", opt)
 			}
 			if correctSet[i] && strings.Contains(strings.ToLower(opt), "config-if") && strings.Contains(strings.ToLower(opt), "ip default-gateway") {
-				return nil, fmt.Errorf("cisco hallucination: ip default-gateway in config-if: %q", opt)
+				return fmt.Errorf("cisco hallucination: ip default-gateway in config-if: %q", opt)
 			}
 		}
 	}
@@ -328,21 +346,97 @@ STRICT JSON OUTPUT FORMAT (NO EXTRA KEYS):
 		}
 	}
 
-	// 5. Ensure question text has appropriate (Choose two) hint if 2 correct answers
+	// 5. Code presence vs question prompt check
+	cleanCode := strings.TrimSpace(dto.Code)
+	if strings.HasPrefix(cleanCode, "```") {
+		lines := strings.Split(cleanCode, "\n")
+		if len(lines) >= 2 && strings.HasPrefix(lines[0], "```") && strings.HasSuffix(lines[len(lines)-1], "```") {
+			cleanCode = strings.TrimSpace(strings.Join(lines[1:len(lines)-1], "\n"))
+		}
+	}
+	dto.Code = cleanCode
+
+	lowerQ := strings.ToLower(dto.Question)
+	requiresCodePhrases := []string{
+		"following code",
+		"following snippet",
+		"following configuration",
+		"following dockerfile",
+		"following script",
+		"code snippet below",
+		"configuration below",
+		"in the code above",
+		"in the snippet above",
+	}
+	for _, phrase := range requiresCodePhrases {
+		if strings.Contains(lowerQ, phrase) && dto.Code == "" {
+			return fmt.Errorf("question prompt references a snippet (%q), but code field is empty", phrase)
+		}
+	}
+
+	// 6. Syntax completeness and truncation guards for code snippets
+	if len(dto.Code) > 0 {
+		// Balanced parentheses and braces check
+		if strings.Count(dto.Code, "(") > strings.Count(dto.Code, ")") {
+			return fmt.Errorf("code snippet appears truncated: unclosed parenthesis")
+		}
+		if strings.Count(dto.Code, "{") > strings.Count(dto.Code, "}") {
+			return fmt.Errorf("code snippet appears truncated: unclosed curly brace")
+		}
+
+		// Check for unclosed string literal on the final line
+		lines := strings.Split(dto.Code, "\n")
+		if len(lines) > 0 {
+			lastLine := strings.TrimSpace(lines[len(lines)-1])
+			if !strings.HasPrefix(lastLine, "//") && !strings.HasPrefix(lastLine, "#") {
+				quoteCount := 0
+				for j := 0; j < len(lastLine); j++ {
+					if lastLine[j] == 34 && (j == 0 || lastLine[j-1] != 92) {
+						quoteCount++
+					}
+				}
+				if quoteCount%2 != 0 {
+					return fmt.Errorf("code snippet appears truncated with unclosed quote on final line: %q", lastLine)
+				}
+			}
+		}
+
+		// DevOps & Linux: Strictly ban application programming code (Go, Java, C#, C++ SDKs)
+		isInfra := strings.Contains(strings.ToLower(categoryName), "devops") ||
+			strings.Contains(strings.ToLower(categoryName), "linux") ||
+			strings.Contains(strings.ToLower(categoryName), "docker") ||
+			strings.Contains(strings.ToLower(categoryName), "container")
+
+		if isInfra {
+			lowerLang := strings.ToLower(dto.Language)
+			lowerCode := strings.ToLower(dto.Code)
+			if lowerLang == "go" || lowerLang == "golang" || lowerLang == "java" || lowerLang == "csharp" || lowerLang == "cpp" ||
+				strings.Contains(lowerCode, "package main") || strings.Contains(lowerCode, "func main()") {
+				return fmt.Errorf("infra category (%s) must not contain application programming code (%s)", categoryName, lowerLang)
+			}
+		}
+
+		// Auto-set code_analysis type
+		dto.Type = "code_analysis"
+	} else {
+		// If code is empty, force multiple_choice type and clear language
+		dto.Type = "multiple_choice"
+		dto.Language = ""
+	}
+
+	// 7. Ensure question text has appropriate (Choose two) hint if 2 correct answers
 	dto.Question = strings.TrimSpace(dto.Question)
 	if len(dto.CorrectIndices) == 2 {
-		lowerQ := strings.ToLower(dto.Question)
 		if !strings.Contains(lowerQ, "choose two") && !strings.Contains(lowerQ, "select two") && !strings.Contains(lowerQ, "select 2") && !strings.Contains(lowerQ, "which two") {
 			dto.Question += " (Choose two)"
 		}
 	} else if len(dto.CorrectIndices) == 1 {
-		lowerQ := strings.ToLower(dto.Question)
 		if strings.Contains(lowerQ, "which two") || strings.Contains(lowerQ, "choose two") || strings.Contains(lowerQ, "select two") {
-			return nil, fmt.Errorf("mismatch: question says choose two, but correct_indices has 1 element")
+			return fmt.Errorf("mismatch: question says choose two, but correct_indices has 1 element")
 		}
 	}
 
-	// 6. Explanation / Correct Index consistency check
+	// 8. Explanation / Correct Index consistency check
 	lowerExpl := strings.ToLower(dto.Explanation)
 	for i, opt := range dto.Options {
 		if !correctSet[i] {
@@ -357,25 +451,15 @@ STRICT JSON OUTPUT FORMAT (NO EXTRA KEYS):
 				}
 				for _, pat := range patterns {
 					if strings.Contains(lowerExpl, pat) {
-						return nil, fmt.Errorf("explanation inconsistency: explanation states %q is correct, but index %d is not in correct_indices", cleanOpt, i)
+						return fmt.Errorf("explanation inconsistency: explanation states %q is correct, but index %d is not in correct_indices", cleanOpt, i)
 					}
 				}
 			}
 		}
 	}
 
-	// 7. Anti-spoiler guard: ensure code snippet does not duplicate or leak options
-	cleanCode := strings.TrimSpace(dto.Code)
-	if strings.HasPrefix(cleanCode, "```") {
-		lines := strings.Split(cleanCode, "\n")
-		if len(lines) >= 2 && strings.HasPrefix(lines[0], "```") && strings.HasSuffix(lines[len(lines)-1], "```") {
-			cleanCode = strings.TrimSpace(strings.Join(lines[1:len(lines)-1], "\n"))
-		}
-	}
-	dto.Code = cleanCode
-
+	// 9. Anti-spoiler guard: ensure code snippet does not duplicate or leak options
 	if len(dto.Code) > 0 {
-		lowerQ := strings.ToLower(dto.Question)
 		isWhichCmd := strings.Contains(lowerQ, "which command") ||
 			strings.Contains(lowerQ, "what command") ||
 			strings.Contains(lowerQ, "which of the following command") ||
@@ -445,5 +529,5 @@ STRICT JSON OUTPUT FORMAT (NO EXTRA KEYS):
 		}
 	}
 
-	return &dto, nil
+	return nil
 }

@@ -453,6 +453,40 @@ func (d *DB) GetRandomQuestion(categorySlug, difficulty string) (*models.Questio
 	return &q, nil
 }
 
+// GetRecentQuestionTitles returns the most recent question texts for a category to prevent repetition.
+func (d *DB) GetRecentQuestionTitles(categoryID int64, limit int) ([]string, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 6
+	}
+
+	rows, err := d.conn.Query(`
+		SELECT question_text
+		FROM questions
+		WHERE category_id = ?
+		ORDER BY id DESC
+		LIMIT ?
+	`, categoryID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var titles []string
+	for rows.Next() {
+		var text string
+		if err := rows.Scan(&text); err == nil && text != "" {
+			trimmed := strings.TrimSpace(text)
+			if len(trimmed) > 120 {
+				trimmed = trimmed[:120] + "..."
+			}
+			titles = append(titles, trimmed)
+		}
+	}
+	return titles, nil
+}
 
 // GetPrefetchQuestions retrieves a batch of questions matching filters with options and validation metadata.
 func (d *DB) GetPrefetchQuestions(categorySlug, difficulty string, count int, excludeIDs []int64) ([]models.OfflineQuestion, error) {
@@ -758,13 +792,13 @@ func (d *DB) SaveGeneratedQuestion(dto models.GeneratedQuestionDTO, categoryID i
 		}
 	}
 
-	qType := dto.Type
-	if qType == "" {
-		if strings.TrimSpace(dto.Code) != "" {
-			qType = "code_analysis"
-		} else {
-			qType = "multiple_choice"
-		}
+	cleanCodeSnippet := strings.TrimSpace(dto.Code)
+	var qType string
+	if cleanCodeSnippet != "" {
+		qType = "code_analysis"
+	} else {
+		qType = "multiple_choice"
+		dto.Language = ""
 	}
 
 	diff := dto.Difficulty

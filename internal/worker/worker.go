@@ -137,13 +137,13 @@ func (w *Worker) checkAndGenerate(ctx context.Context, source string) {
 	w.updateStatus(isOnline, false, "")
 
 	if !isOnline {
-		log.Printf("[Worker] Category refill needed (< %d), but AI service '%s' is offline. Will retry later.",
+		log.Printf("[Worker] Category refill needed (< %d), but AI service %s is offline. Will retry later.",
 			w.cfg.MinCategoryBuffer, w.aiClient.GetModelName())
-		w.updateStatus(false, false, fmt.Sprintf("AI service '%s' unreachable (refill pending for %d categories)", w.aiClient.GetModelName(), len(needRefill)))
+		w.updateStatus(false, false, fmt.Sprintf("AI service %s unreachable (refill pending for %d categories)", w.aiClient.GetModelName(), len(needRefill)))
 		return
 	}
 
-	log.Printf("[Worker] AI model '%s' is online! %d categories have < %d questions. Refilling up to %d questions...",
+	log.Printf("[Worker] AI model %s is online! %d categories have < %d questions. Refilling up to %d questions...",
 		w.aiClient.GetModelName(), len(needRefill), w.cfg.MinCategoryBuffer, w.cfg.BatchSize)
 
 	w.updateStatus(true, true, fmt.Sprintf("Refilling pool up to %d questions for %d categories via %s...", w.cfg.BatchSize, len(needRefill), w.aiClient.GetModelName()))
@@ -160,14 +160,12 @@ func (w *Worker) generateCategoryBatches(ctx context.Context, categories []model
 	// Ensure GPU VRAM is completely freed after batch completes or aborts (no-op for Gemini)
 	defer func() {
 		_ = w.aiClient.UnloadModel(context.Background())
-		log.Printf("[Worker] Completed batch session for AI model '%s'.", w.aiClient.GetModelName())
+		log.Printf("[Worker] Completed batch session for AI model %s.", w.aiClient.GetModelName())
 	}()
 
 	targetPerCategory := w.cfg.BatchSize // 50 questions target per category
 	totalGenerated := 0
 	totalSaved := 0
-
-	difficulties := []string{"junior"} // 100% Junior practical level (no middle complexity)
 
 	// Rate limit delay: Gemini free tier limit is 15 RPM (~4s/req).
 	sleepDur := 1 * time.Second
@@ -184,9 +182,11 @@ func (w *Worker) generateCategoryBatches(ctx context.Context, categories []model
 			needed = targetPerCategory
 		}
 
-		log.Printf("[Worker] Generating %d questions to refill category '%s' (current available: %d, target: %d)...",
+		log.Printf("[Worker] Generating %d questions to refill category %s (current available: %d, target: %d)...",
 			needed, cat.Name, cat.AvailableQuestions, targetPerCategory)
 		catSaved := 0
+
+		isInfra := cat.Slug == "cisco-networking" || cat.Slug == "docker-and-containers" || cat.Slug == "devops-linux"
 
 		for i := 0; i < needed; i++ {
 			select {
@@ -196,17 +196,34 @@ func (w *Worker) generateCategoryBatches(ctx context.Context, categories []model
 			default:
 			}
 
-			diff := difficulties[rand.Intn(len(difficulties))]
+			// Infrastructure categories are strictly 100% Middle level.
+			// Other categories are 70% Middle / 30% Junior.
+			diff := "middle"
+			if !isInfra {
+				if rand.Float64() < 0.3 {
+					diff = "junior"
+				}
+			}
+
+			// Dynamically inject recent question titles as negative context to prevent duplicates and cliches
+			instructions := cat.PromptInstructions
+			recentTitles, err := w.database.GetRecentQuestionTitles(cat.ID, 8)
+			if err == nil && len(recentTitles) > 0 {
+				instructions += "\n\nCRITICAL DIVERSITY REQUIREMENT: Avoid repeating the following concepts or patterns recently generated in this category:\n"
+				for _, t := range recentTitles {
+					instructions += fmt.Sprintf("- %s\n", t)
+				}
+			}
 
 			genCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
-			dto, err := w.aiClient.GenerateQuestion(genCtx, cat.Name, cat.PromptInstructions, diff)
+			dto, err := w.aiClient.GenerateQuestion(genCtx, cat.Name, instructions, diff)
 			cancel()
 
 			if err != nil {
-				log.Printf("[Worker] Error generating question for '%s': %v", cat.Name, err)
+				log.Printf("[Worker] Error generating question for %s: %v", cat.Name, err)
 				if !w.aiClient.Ping(ctx) {
-					log.Printf("[Worker] AI service '%s' disconnected mid-batch. Halting.", w.aiClient.GetModelName())
-					w.updateStatus(false, false, fmt.Sprintf("AI service '%s' disconnected during generation", w.aiClient.GetModelName()))
+					log.Printf("[Worker] AI service %s disconnected mid-batch. Halting.", w.aiClient.GetModelName())
+					w.updateStatus(false, false, fmt.Sprintf("AI service %s disconnected during generation", w.aiClient.GetModelName()))
 					return
 				}
 				time.Sleep(2 * time.Second)
@@ -220,10 +237,10 @@ func (w *Worker) generateCategoryBatches(ctx context.Context, categories []model
 			} else if saved {
 				catSaved++
 				totalSaved++
-				log.Printf("[Worker] [%s %d/%d] Saved question (%s, answers=%d)",
-					cat.Name, catSaved, needed, dto.Difficulty, len(dto.CorrectIndices))
+				log.Printf("[Worker] [%s %d/%d] Saved question (%s, answers=%d, type=%s)",
+					cat.Name, catSaved, needed, dto.Difficulty, len(dto.CorrectIndices), dto.Type)
 			} else {
-				log.Printf("[Worker] Duplicate question skipped for '%s'", cat.Name)
+				log.Printf("[Worker] Duplicate question skipped for %s", cat.Name)
 			}
 
 			time.Sleep(sleepDur)
