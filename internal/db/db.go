@@ -824,7 +824,15 @@ func (d *DB) SaveGeneratedQuestion(dto models.GeneratedQuestionDTO, categoryID i
 		correctSet[idx] = true
 	}
 
+	prefixRegex := regexp.MustCompile(`^(?i)(?:option\s*)?[A-D1-4][\.\)\:\-]\s*`)
 	for i, optText := range dto.Options {
+		cleanOpt := prefixRegex.ReplaceAllString(strings.TrimSpace(optText), "")
+		if strings.HasPrefix(cleanOpt, "```") {
+			lines := strings.Split(cleanOpt, "\n")
+			if len(lines) >= 2 && strings.HasPrefix(lines[0], "```") && strings.HasSuffix(lines[len(lines)-1], "```") {
+				cleanOpt = strings.TrimSpace(strings.Join(lines[1:len(lines)-1], "\n"))
+			}
+		}
 		isCorrect := 0
 		if correctSet[i] {
 			isCorrect = 1
@@ -832,7 +840,7 @@ func (d *DB) SaveGeneratedQuestion(dto models.GeneratedQuestionDTO, categoryID i
 		_, err := tx.Exec(`
 			INSERT INTO options (question_id, option_text, is_correct, order_idx)
 			VALUES (?, ?, ?, ?)
-		`, qID, optText, isCorrect, i)
+		`, qID, cleanOpt, isCorrect, i)
 		if err != nil {
 			return false, err
 		}

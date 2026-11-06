@@ -548,6 +548,15 @@ function formatOptionText(text: string): string {
     t = t.replace(/^Outputs?:\s+/i, '')
   }
 
+  // Strip option prefixes like "A. ", "B. ", "1. ", "Option A: "
+  t = t.replace(/^(?:option\s*)?[A-D1-4][\.\)\:\-]\s*/i, '')
+
+  // Strip markdown code fences if option was wrapped in ```
+  const fenceMatch = t.match(/^```(?:[a-zA-Z0-9_\-#+]*)?\n?([\s\S]*?)\n?```$/)
+  if (fenceMatch) {
+    t = fenceMatch[1]
+  }
+
   return t.trim()
 }
 
@@ -579,6 +588,12 @@ const parsedQuestion = computed(() => {
   const optIdx = text.search(/\n\s*Options:\s*\n/i)
   if (optIdx !== -1) {
     text = text.substring(0, optIdx).trim()
+  }
+
+  // 3. Clean duplicate or conflicting choice hints (e.g. "(Choose one) (Choose two)")
+  text = text.replace(/\s*\((?:choose|select)\s*(?:one|two|three|four|[1-4])\)/gi, '').trim()
+  if (currentQuestion.value.expected_correct_count && currentQuestion.value.expected_correct_count > 1) {
+    text += ` (Choose ${currentQuestion.value.expected_correct_count})`
   }
 
   return { text, code }

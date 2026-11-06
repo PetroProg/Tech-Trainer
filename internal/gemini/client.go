@@ -19,6 +19,7 @@ var (
 	dummyOptionRegex = regexp.MustCompile(`^(?i)option\s+[a-d0-9]$`)
 	ciscoCidrRegex   = regexp.MustCompile(`(?i)ip\s+address\s+[0-9\.]+\s*/\d+`)
 	fenceRegex       = regexp.MustCompile("(?s)```([a-zA-Z0-9_\\-#+]*)\\n?(.*?)\\n?```")
+	choiceHintRegex  = regexp.MustCompile(`(?i)\s*\((?:choose|select)\s*(?:one|two|three|four|[1-4])\)\s*`)
 )
 
 // Client handles communication with Google Gemini Generative Language REST API.
@@ -154,11 +155,13 @@ CORE ARCHITECTURE & DIVERSITY:
    - If there is code/config to inspect, place it strictly in the "code" field without markdown fences.
    - If the question asks "Which command..." or "Which code snippet...", candidate choices belong in the "options" array, NOT in "code".
    - Code snippets must be syntactically complete. Never truncate or cut off code mid-line.
+   - CONTRACT INTEGRITY: NEVER ask "Which of the following code snippets accomplishes X?" if the options are scalar values, numbers, or boolean results. If testing evaluation or output, phrase the question as "What is the output of the following code snippet?" and place the snippet in "code". If asking which code snippet accomplishes X, each option MUST be an actual code snippet, and any shared variables or context must be fully self-contained.
 
 5. Options Policy:
    - Exactly 4 completely unique options.
    - NEVER use placeholder option names like "Option A", "Option B", "Option 1", "Option 2".
    - NEVER prefix options with letters or numbers ("A. ", "1. ", "Option A:").
+   - NEVER wrap individual options in markdown backticks or code fences .
    - 1 or 2 correct answers (~75% single-choice with 1 correct, ~25% multi-select with 2 correct).
    - If exactly 2 options are correct, question text MUST end with " (Choose two)".
    - If only 1 option is correct, question MUST NOT say "choose two" or "select all".
@@ -292,6 +295,14 @@ func (c *Client) validateAndCleanDTO(dto *models.GeneratedQuestionDTO, categoryN
 		cleaned := prefixRegex.ReplaceAllString(trimmed, "")
 		cleaned = strings.TrimSpace(cleaned)
 
+		// Strip markdown code fences if option was wrapped in ```
+		if strings.HasPrefix(cleaned, "```") {
+			lines := strings.Split(cleaned, "\n")
+			if len(lines) >= 2 && strings.HasPrefix(lines[0], "```") && strings.HasSuffix(lines[len(lines)-1], "```") {
+				cleaned = strings.TrimSpace(strings.Join(lines[1:len(lines)-1], "\n"))
+			}
+		}
+
 		if cleaned == "" || dummyOptionRegex.MatchString(cleaned) {
 			return fmt.Errorf("option %d is empty or placeholder (%q)", i, opt)
 		}
@@ -370,7 +381,40 @@ func (c *Client) validateAndCleanDTO(dto *models.GeneratedQuestionDTO, categoryN
 	}
 	for _, phrase := range requiresCodePhrases {
 		if strings.Contains(lowerQ, phrase) && dto.Code == "" {
-			return fmt.Errorf("question prompt references a snippet (%q), but code field is empty", phrase)
+			isWhichSnippet := strings.Contains(lowerQ, "which code snippet") ||
+				strings.Contains(lowerQ, "which of the following code") ||
+				strings.Contains(lowerQ, "which snippet") ||
+				strings.Contains(lowerQ, "which of the following snippet") ||
+				strings.Contains(lowerQ, "which configuration") ||
+				strings.Contains(lowerQ, "which of the following configuration")
+			if !isWhichSnippet {
+				return fmt.Errorf("question prompt references a snippet (%q), but code field is empty", phrase)
+			}
+		}
+	}
+
+	// If question asks for code snippet choice, ensure options contain actual code tokens (not scalar numbers or strings)
+	isSnippetChoiceQ := strings.Contains(lowerQ, "which code snippet") ||
+		strings.Contains(lowerQ, "which of the following code") ||
+		strings.Contains(lowerQ, "which snippet") ||
+		strings.Contains(lowerQ, "which of the following snippet")
+
+	if isSnippetChoiceQ && dto.Code == "" {
+		hasCodeSyntax := false
+		for _, opt := range dto.Options {
+			optLower := strings.ToLower(opt)
+			if strings.ContainsAny(opt, "(){}=><;:") || strings.Contains(opt, "\n") ||
+				strings.Contains(optLower, "def ") || strings.Contains(optLower, "func ") ||
+				strings.Contains(optLower, "var ") || strings.Contains(optLower, "let ") ||
+				strings.Contains(optLower, "const ") || strings.Contains(optLower, "return ") ||
+				strings.Contains(optLower, "import ") || strings.Contains(optLower, "class ") ||
+				strings.Contains(optLower, "echo ") || strings.Contains(optLower, "print") {
+				hasCodeSyntax = true
+				break
+			}
+		}
+		if !hasCodeSyntax {
+			return fmt.Errorf("question asks for code snippets (%q), but options are scalar values without code syntax", dto.Question)
 		}
 	}
 
@@ -424,16 +468,10 @@ func (c *Client) validateAndCleanDTO(dto *models.GeneratedQuestionDTO, categoryN
 		dto.Language = ""
 	}
 
-	// 7. Ensure question text has appropriate (Choose two) hint if 2 correct answers
-	dto.Question = strings.TrimSpace(dto.Question)
+	// 7. Ensure question text has appropriate (Choose two) hint if 2 correct answers, avoiding duplicate hints
+	dto.Question = strings.TrimSpace(choiceHintRegex.ReplaceAllString(dto.Question, " "))
 	if len(dto.CorrectIndices) == 2 {
-		if !strings.Contains(lowerQ, "choose two") && !strings.Contains(lowerQ, "select two") && !strings.Contains(lowerQ, "select 2") && !strings.Contains(lowerQ, "which two") {
-			dto.Question += " (Choose two)"
-		}
-	} else if len(dto.CorrectIndices) == 1 {
-		if strings.Contains(lowerQ, "which two") || strings.Contains(lowerQ, "choose two") || strings.Contains(lowerQ, "select two") {
-			return fmt.Errorf("mismatch: question says choose two, but correct_indices has 1 element")
-		}
+		dto.Question += " (Choose two)"
 	}
 
 	// 8. Explanation / Correct Index consistency check
